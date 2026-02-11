@@ -135,6 +135,19 @@ class FTSIndex:
             logger.error(f"Error upserting document {file_path}: {e}")
             return False
     
+    def _escape_fts_query(self, query: str) -> str:
+        """
+        Escape query for FTS5 to prevent syntax errors.
+        FTS5 interprets ':' as column specifier (e.g., "1:1" -> column "1" term "1").
+        Wrap terms in double quotes to treat as literal phrases.
+        """
+        # If query contains special FTS5 characters, quote it
+        if any(c in query for c in [':', '*', '"', 'OR', 'AND', 'NOT', 'NEAR']):
+            # Escape existing quotes and wrap in quotes
+            escaped = query.replace('"', '""')
+            return f'"{escaped}"'
+        return query
+    
     def search(
         self,
         query: str,
@@ -150,9 +163,12 @@ class FTSIndex:
         - snippet: highlighted excerpt
         - score: BM25 relevance score (higher = better)
         """
+        # Escape query for FTS5 syntax
+        fts_query = self._escape_fts_query(query)
+        
         # Build WHERE clause
         where_parts = ["documents_fts MATCH ?"]
-        params = [query]
+        params = [fts_query]
         
         if vault != "all":
             where_parts.append("d.vault = ?")

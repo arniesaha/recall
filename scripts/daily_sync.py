@@ -6,7 +6,7 @@ Daily Sync Workflow for Knowledge Graph
 - Deduplicates content (same meeting, different files)
 - Triggers re-indexing via API
 
-Run via cron: 0 6 * * * /usr/bin/python3 /home/Arnab/clawd/projects/knowledge-graph/scripts/daily_sync.py
+Run via cron: 0 6 * * * /usr/bin/python3 /home/Arnab/clawd/projects/note-rag/scripts/daily_sync.py
 Or via n8n webhook
 """
 
@@ -27,17 +27,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/home/Arnab/clawd/projects/knowledge-graph/logs/daily_sync.log'),
+        logging.FileHandler('/home/Arnab/clawd/projects/note-rag/logs/daily_sync.log'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
 # Paths
-VAULT_PATH = Path("/home/Arnab/clawd/projects/knowledge-graph/obsidian/work")
+VAULT_PATH = Path("/home/Arnab/clawd/projects/note-rag/obsidian/work")
 GRANOLA_PATH = VAULT_PATH / "Granola" / "Transcripts"
-STATE_FILE = Path("/home/Arnab/clawd/projects/knowledge-graph/data/sync_state.json")
-DUPLICATES_LOG = Path("/home/Arnab/clawd/projects/knowledge-graph/logs/duplicates.log")
+STATE_FILE = Path("/home/Arnab/clawd/projects/note-rag/data/sync_state.json")
+DUPLICATES_LOG = Path("/home/Arnab/clawd/projects/note-rag/logs/duplicates.log")
 
 # API Config
 API_URL = "http://localhost:8080"
@@ -660,7 +660,7 @@ def main(full_scan: bool = False):
     logger.info("Starting daily sync workflow")
     
     # Create logs directory
-    Path('/home/Arnab/clawd/projects/knowledge-graph/logs').mkdir(parents=True, exist_ok=True)
+    Path('/home/Arnab/clawd/projects/note-rag/logs').mkdir(parents=True, exist_ok=True)
     
     # Load state
     state = load_state()
