@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: note-rag
+  namespace: apps
+  labels:
+    app: note-rag
+    release: prometheus  # Match Prometheus operator's selector
+spec:
+  selector:
+    matchLabels:
+      app: note-rag
+  namespaceSelector:
+    matchNames:
+      - apps
+  endpoints:
+    - targetPort: 8080
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
