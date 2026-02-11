@@ -217,6 +217,25 @@ class FTSIndex:
             )
         return cursor.fetchone()[0]
     
+    def delete_document(self, file_path: str, vault: str = None) -> bool:
+        """Remove a document from the FTS index."""
+        try:
+            if vault:
+                self.conn.execute(
+                    "DELETE FROM fts_documents WHERE file_path = ? AND vault = ?",
+                    (file_path, vault)
+                )
+            else:
+                self.conn.execute(
+                    "DELETE FROM fts_documents WHERE file_path = ?",
+                    (file_path,)
+                )
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting document {file_path}: {e}")
+            return False
+    
     def clear_vault(self, vault: str):
         """Remove all documents from a vault."""
         self.conn.execute("DELETE FROM fts_documents WHERE vault = ?", (vault,))

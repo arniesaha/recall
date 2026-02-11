@@ -3,9 +3,9 @@
 replicaCount: 1
 
 image:
-  repository: note-rag-api
+  repository: localhost:5000/note-rag-api
   tag: latest
-  pullPolicy: Never  # Local image
+  pullPolicy: Always
 
 service:
   type: ClusterIP

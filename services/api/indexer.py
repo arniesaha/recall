@@ -34,6 +34,7 @@ class DocumentChunk(LanceModel):
     vector: Vector(768)          # nomic-embed-text dimension
     file_path: str
     file_hash: str               # MD5 of file content (for change detection)
+    mtime: float                 # File modification time (Unix timestamp) for fast change detection
     title: str
     category: str
     people: List[str]
@@ -239,7 +240,7 @@ class Indexer:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(_executor, self._read_file_sync, file_path)
     
-    async def index_file(self, file_path: Path, table_name: str) -> int:
+    async def index_file(self, file_path: Path, table_name: str, mtime: Optional[float] = None) -> int:
         """Index a single file."""
         if self.is_excluded(file_path):
             logger.debug(f"Skipping excluded file: {file_path}")
@@ -249,6 +250,13 @@ class Indexer:
         if content is None or len(content.strip()) < 50:
             logger.debug(f"Skipping short/unreadable file: {file_path}")
             return 0
+        
+        # Get mtime if not provided
+        if mtime is None:
+            try:
+                mtime = file_path.stat().st_mtime
+            except:
+                mtime = 0.0
         
         metadata = await self.extract_metadata(file_path, content)
         body = metadata.pop("body")
@@ -277,6 +285,7 @@ class Indexer:
                     vector=embedding,
                     file_path=chunk["file_path"],
                     file_hash=chunk["file_hash"],
+                    mtime=mtime,
                     title=chunk["title"],
                     category=chunk["category"],
                     people=chunk["people"],
@@ -383,9 +392,18 @@ class Indexer:
         return total_indexed
     
     async def incremental_index(self, vault: str = "all") -> int:
-        """Incremental index (only new/modified files). Non-blocking."""
+        """
+        Incremental index (only new/modified/deleted files). Non-blocking.
+        
+        Uses two-tier change detection:
+        1. Fast tier: mtime check (filesystem stat) - skip if unchanged
+        2. Accurate tier: content hash - only for files where mtime changed
+        
+        Also handles deletions: removes index entries for files that no longer exist.
+        """
         self._cancel_requested = False
         total_indexed = 0
+        total_deleted = 0
         
         vaults_to_index = []
         if vault in ["all", "work"]:
@@ -401,50 +419,112 @@ class Indexer:
             
             table = self.db.open_table(table_name)
             
-            # Get existing file hashes
+            # Get existing indexed files with mtime and hash
             try:
-                existing = table.search().select(["file_path", "file_hash"]).limit(100000).to_list()
-                existing_hashes = {r["file_path"]: r["file_hash"] for r in existing}
-            except:
-                existing_hashes = {}
+                existing = table.search().select(["file_path", "file_hash", "mtime"]).limit(100000).to_list()
+                # Dedupe by file_path (multiple chunks per file)
+                indexed_files = {}
+                for r in existing:
+                    fp = r["file_path"]
+                    if fp not in indexed_files:
+                        indexed_files[fp] = {
+                            "file_hash": r["file_hash"],
+                            "mtime": r.get("mtime", 0.0)  # Handle legacy records without mtime
+                        }
+            except Exception as e:
+                logger.warning(f"Could not read existing index: {e}")
+                indexed_files = {}
             
-            # List files (non-blocking)
+            # List files on disk (non-blocking)
             md_files = await self.list_markdown_files(vault_path)
+            disk_files = {str(f) for f in md_files}
             
-            # Check each file
+            # === DELETION HANDLING ===
+            # Find files in index but not on disk
+            deleted_files = set(indexed_files.keys()) - disk_files
+            if deleted_files:
+                logger.info(f"Found {len(deleted_files)} deleted files to remove from index")
+                for deleted_path in deleted_files:
+                    if self._cancel_requested:
+                        break
+                    try:
+                        table.delete(f'file_path = "{deleted_path}"')
+                        total_deleted += 1
+                        # Also remove from FTS
+                        if self.fts_index:
+                            try:
+                                self.fts_index.delete_document(deleted_path, table_name)
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.warning(f"Failed to delete {deleted_path} from index: {e}")
+            
+            # === CHANGE DETECTION ===
             files_checked = 0
+            files_skipped_mtime = 0
+            files_skipped_hash = 0
+            
             for md_file in md_files:
                 if self._cancel_requested:
                     logger.info("Indexing cancelled by request")
                     break
                 
-                content = await self.read_file(md_file)
-                if content is None:
-                    continue
-                
-                # Compute hash in thread pool
-                loop = asyncio.get_event_loop()
-                current_hash = await loop.run_in_executor(
-                    _executor,
-                    lambda c: hashlib.md5(c.encode()).hexdigest(),
-                    content
-                )
-                
                 file_path_str = str(md_file)
                 
-                # Skip if unchanged
-                if file_path_str in existing_hashes:
-                    if existing_hashes[file_path_str] == current_hash:
+                # Get current mtime (fast stat call)
+                try:
+                    current_mtime = md_file.stat().st_mtime
+                except Exception as e:
+                    logger.warning(f"Could not stat {md_file}: {e}")
+                    continue
+                
+                # TIER 1: mtime check (fast)
+                if file_path_str in indexed_files:
+                    indexed_mtime = indexed_files[file_path_str].get("mtime", 0.0)
+                    if indexed_mtime and abs(current_mtime - indexed_mtime) < 1.0:
+                        # mtime unchanged (within 1 second tolerance) - skip
+                        files_skipped_mtime += 1
+                        continue
+                    
+                    # mtime changed - need to check content hash
+                    content = await self.read_file(md_file)
+                    if content is None:
+                        continue
+                    
+                    # TIER 2: content hash check
+                    loop = asyncio.get_event_loop()
+                    current_hash = await loop.run_in_executor(
+                        _executor,
+                        lambda c: hashlib.md5(c.encode()).hexdigest(),
+                        content
+                    )
+                    
+                    if current_hash == indexed_files[file_path_str]["file_hash"]:
+                        # Content unchanged (mtime was misleading, e.g., touch/copy)
+                        # Update mtime in index to avoid re-checking next time
+                        try:
+                            table.update(
+                                where=f'file_path = "{file_path_str}"',
+                                values={"mtime": current_mtime}
+                            )
+                        except:
+                            pass  # Non-critical
+                        files_skipped_hash += 1
                         continue
                 
-                # Index new/modified file
-                count = await self.index_file(md_file, table_name)
+                # File is new or modified - index it
+                count = await self.index_file(md_file, table_name, mtime=current_mtime)
                 total_indexed += count
                 
                 files_checked += 1
-                # Yield every 10 files
+                # Yield every 10 files to keep server responsive
                 if files_checked % 10 == 0:
                     await asyncio.sleep(0)
+            
+            logger.info(
+                f"{table_name}: indexed={total_indexed}, deleted={total_deleted}, "
+                f"skipped(mtime)={files_skipped_mtime}, skipped(hash)={files_skipped_hash}"
+            )
         
-        logger.info(f"Incremental index complete: {total_indexed} chunks")
+        logger.info(f"Incremental index complete: {total_indexed} chunks indexed, {total_deleted} files removed")
         return total_indexed
