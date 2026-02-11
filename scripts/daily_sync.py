@@ -39,9 +39,9 @@ GRANOLA_PATH = VAULT_PATH / "Granola" / "Transcripts"
 STATE_FILE = Path("/home/Arnab/clawd/projects/note-rag/data/sync_state.json")
 DUPLICATES_LOG = Path("/home/Arnab/clawd/projects/note-rag/logs/duplicates.log")
 
-# API Config
-API_URL = "http://localhost:8080"
-API_TOKEN = "kg-api-token-change-me"
+# API Config - use k8s internal ClusterIP (external URLs are behind Cloudflare Access)
+API_URL = os.environ.get("NOTE_RAG_API_URL", "http://10.43.12.249:8080")
+API_TOKEN = os.environ.get("NOTE_RAG_API_TOKEN", "kg-api-token-change-me")
 
 # Deduplication thresholds
 TITLE_SIMILARITY_THRESHOLD = 0.85  # 85% similar titles = likely same meeting
@@ -99,8 +99,34 @@ def save_state(state: Dict):
     """Save sync state."""
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     state['last_run'] = datetime.now().isoformat()
+    # Don't persist the indexes - they're rebuilt on load
+    state_to_save = {k: v for k, v in state.items() if k not in ('granola_id_index',)}
     with open(STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
+        json.dump(state_to_save, f, indent=2)
+
+
+def update_state_indexes(state: Dict, path_str: str, info: Dict, content_fp: str = None):
+    """Update all state indexes after processing a file."""
+    # Update granola_id index
+    granola_id = info.get('granola_id', '')
+    if granola_id:
+        if 'granola_id_index' not in state:
+            state['granola_id_index'] = {}
+        state['granola_id_index'][granola_id] = {
+            'path': path_str,
+            'output': info.get('output', path_str),
+            'content_len': info.get('content_len', 0)
+        }
+    
+    # Update content index
+    if content_fp:
+        if 'content_index' not in state:
+            state['content_index'] = {}
+        state['content_index'][content_fp] = {
+            'path': path_str,
+            'output': info.get('output', path_str),
+            'content_len': info.get('content_len', 0)
+        }
 
 
 def get_file_hash(path: Path) -> str:
@@ -371,20 +397,31 @@ def find_duplicate(
     title = normalize_title(frontmatter.get('title', ''))
     content_fp = get_content_fingerprint(body)
     
-    # Build content index if not present
+    # Build indexes if not present
     if 'content_index' not in state:
         state['content_index'] = {}
-    
-    # Check granola_id match
-    if granola_id:
+    if 'granola_id_index' not in state:
+        # Build granola_id index from existing processed entries
+        state['granola_id_index'] = {}
         for path_str, info in state['processed'].items():
-            if info.get('granola_id') == granola_id and path_str != str(current_path):
-                return {
+            gid = info.get('granola_id', '')
+            if gid:
+                state['granola_id_index'][gid] = {
                     'path': path_str,
                     'output': info.get('output', path_str),
-                    'reason': 'same_granola_id',
-                    'existing_content_len': info.get('content_len', 0)
+                    'content_len': info.get('content_len', 0)
                 }
+    
+    # Check granola_id match (O(1) lookup via index)
+    if granola_id and granola_id in state['granola_id_index']:
+        existing = state['granola_id_index'][granola_id]
+        if existing['path'] != str(current_path):
+            return {
+                'path': existing['path'],
+                'output': existing['output'],
+                'reason': 'same_granola_id',
+                'existing_content_len': existing.get('content_len', 0)
+            }
     
     # Check same date + similar title
     for path_str, info in state['processed'].items():
@@ -502,7 +539,7 @@ def process_file(path: Path, state: Dict, stats: Dict) -> Optional[Path]:
                 logger.info(f"  -> Previous output missing, processing fresh")
         
             # Update state even for skipped files
-            state['processed'][path_str] = {
+            info = {
                 'hash': file_hash,
                 'output': str(existing_output),
                 'category': category,
@@ -513,11 +550,8 @@ def process_file(path: Path, state: Dict, stats: Dict) -> Optional[Path]:
                 'content_len': content_len,
                 'duplicate_of': duplicate['path']
             }
-            state['content_index'][content_fp] = {
-                'path': path_str,
-                'output': str(existing_output),
-                'content_len': content_len
-            }
+            state['processed'][path_str] = info
+            update_state_indexes(state, path_str, info, content_fp)
             return None
         
         # Not a duplicate - determine output path
@@ -525,7 +559,7 @@ def process_file(path: Path, state: Dict, stats: Dict) -> Optional[Path]:
         
         # Skip if output would be same as input
         if output_path.resolve() == path.resolve():
-            state['processed'][path_str] = {
+            info = {
                 'hash': file_hash, 
                 'output': path_str,
                 'category': category,
@@ -535,23 +569,57 @@ def process_file(path: Path, state: Dict, stats: Dict) -> Optional[Path]:
                 'granola_id': granola_id,
                 'content_len': content_len
             }
-            state['content_index'][content_fp] = {
-                'path': path_str,
-                'output': path_str,
-                'content_len': content_len
-            }
+            state['processed'][path_str] = info
+            update_state_indexes(state, path_str, info, content_fp)
             return None
         
         # Check if output path already exists (another file already there)
         if output_path.exists() and str(output_path) not in [v.get('output') for v in state['processed'].values()]:
-            # Add suffix to avoid overwrite
-            stem = output_path.stem
-            suffix = output_path.suffix
-            counter = 2
-            while output_path.exists():
-                output_path = output_path.parent / f"{stem}-{counter}{suffix}"
-                counter += 1
-            logger.info(f"  -> Output exists, using: {output_path.name}")
+            # Check if existing file has same granola_id (means it's actually a duplicate we should merge)
+            try:
+                existing_content = output_path.read_text(encoding='utf-8')
+                existing_fm, existing_body = parse_frontmatter(existing_content)
+                existing_granola_id = existing_fm.get('granola_id', '')
+                
+                if granola_id and existing_granola_id == granola_id:
+                    # Same meeting! Merge if new content is better
+                    merged, was_merged = merge_content(existing_content, content)
+                    if was_merged:
+                        new_content = update_frontmatter(content, frontmatter, category, people, date)
+                        output_path.write_text(new_content, encoding='utf-8')
+                        logger.info(f"  -> MERGED into existing {output_path.name} (same granola_id, new content longer)")
+                        stats['merged'] += 1
+                    else:
+                        logger.info(f"  -> SKIPPED (same granola_id as {output_path.name}, existing content adequate)")
+                        stats['skipped_duplicates'] += 1
+                    
+                    # Update state
+                    info = {
+                        'hash': file_hash,
+                        'output': str(output_path),
+                        'category': category,
+                        'people': people,
+                        'date': date,
+                        'title': title,
+                        'granola_id': granola_id,
+                        'content_len': content_len,
+                        'duplicate_of': str(output_path)
+                    }
+                    state['processed'][path_str] = info
+                    update_state_indexes(state, path_str, info, content_fp)
+                    return None
+                else:
+                    # Genuine collision - different meetings mapped to same output path
+                    # Log error and skip rather than creating -2 files
+                    logger.error(f"  -> COLLISION: {path.name} would overwrite {output_path.name} (different granola_ids)")
+                    logger.error(f"       Source granola_id: {granola_id}")
+                    logger.error(f"       Existing granola_id: {existing_granola_id}")
+                    stats['errors'] += 1
+                    return None
+            except Exception as e:
+                logger.error(f"  -> Error checking existing file {output_path}: {e}")
+                stats['errors'] += 1
+                return None
         
         # Create directories
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -564,7 +632,7 @@ def process_file(path: Path, state: Dict, stats: Dict) -> Optional[Path]:
         logger.info(f"  -> {output_path.relative_to(VAULT_PATH)}")
         
         # Update state
-        state['processed'][path_str] = {
+        info = {
             'hash': file_hash,
             'output': str(output_path),
             'category': category,
@@ -574,11 +642,8 @@ def process_file(path: Path, state: Dict, stats: Dict) -> Optional[Path]:
             'granola_id': granola_id,
             'content_len': content_len
         }
-        state['content_index'][content_fp] = {
-            'path': path_str,
-            'output': str(output_path),
-            'content_len': content_len
-        }
+        state['processed'][path_str] = info
+        update_state_indexes(state, path_str, info, content_fp)
         
         stats['processed'] += 1
         return output_path
@@ -611,20 +676,22 @@ def find_new_files(state: Dict, hours_back: int = 24) -> List[Path]:
 
 
 def trigger_reindex():
-    """Trigger knowledge graph reindexing."""
+    """Trigger knowledge graph reindexing (async)."""
     try:
+        # Use /index/start endpoint (async) - returns job_id
         response = requests.post(
-            f"{API_URL}/index",
+            f"{API_URL}/index/start",
             headers={
                 'Authorization': f'Bearer {API_TOKEN}',
                 'Content-Type': 'application/json'
             },
-            json={'full': False, 'vault': 'work'},
-            timeout=300
+            json={'vault': 'work'},
+            timeout=30
         )
         if response.ok:
             result = response.json()
-            logger.info(f"Reindex complete: {result}")
+            job_id = result.get('job_id', 'unknown')
+            logger.info(f"Reindex started: job_id={job_id}")
             return True
         else:
             logger.error(f"Reindex failed: {response.status_code} - {response.text}")
