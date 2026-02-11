@@ -22,6 +22,10 @@ from indexer import Indexer
 from searcher import Searcher
 from config import settings
 
+# Prometheus metrics
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Counter, Histogram, Gauge, Info
+
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
@@ -55,6 +59,69 @@ db: lancedb.DBConnection = None
 indexer: Indexer = None
 searcher: Searcher = None
 fts_index = None
+
+# ============== Custom Prometheus Metrics ==============
+
+# Search metrics by mode
+SEARCH_LATENCY = Histogram(
+    'noterag_search_latency_seconds',
+    'Search latency in seconds',
+    ['mode', 'vault'],
+    buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+)
+
+SEARCH_RESULTS = Histogram(
+    'noterag_search_results_count',
+    'Number of search results returned',
+    ['mode'],
+    buckets=[0, 1, 5, 10, 20, 50, 100]
+)
+
+# RAG query metrics
+RAG_LATENCY = Histogram(
+    'noterag_rag_query_latency_seconds',
+    'RAG query latency in seconds',
+    ['vault'],
+    buckets=[1.0, 2.5, 5.0, 10.0, 20.0, 30.0, 60.0]
+)
+
+# Ollama metrics
+OLLAMA_LATENCY = Histogram(
+    'noterag_ollama_latency_seconds',
+    'Ollama embedding/generation latency',
+    ['operation'],  # embed, generate
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+)
+
+OLLAMA_ERRORS = Counter(
+    'noterag_ollama_errors_total',
+    'Ollama errors',
+    ['operation']
+)
+
+# Index metrics
+INDEX_DURATION = Histogram(
+    'noterag_index_duration_seconds',
+    'Indexing job duration in seconds',
+    ['vault', 'full'],
+    buckets=[10, 30, 60, 120, 300, 600, 1800]
+)
+
+INDEX_DOCUMENTS = Gauge(
+    'noterag_indexed_documents',
+    'Number of indexed documents',
+    ['vault', 'index_type']  # vector, fts
+)
+
+# Component health
+COMPONENT_UP = Gauge(
+    'noterag_component_up',
+    'Component health status (1=up, 0=down)',
+    ['component']  # ollama, lancedb, fts
+)
+
+# API info
+API_INFO = Info('noterag_api', 'API version and build info')
 
 
 @asynccontextmanager
@@ -101,6 +168,36 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Instrument with Prometheus
+instrumentator = Instrumentator(
+    should_group_status_codes=True,
+    should_ignore_untemplated=True,
+    should_respect_env_var=False,  # Don't check env var
+    should_instrument_requests_inprogress=True,
+    excluded_handlers=["/metrics", "/ping"],
+    inprogress_name="noterag_inprogress_requests",
+    inprogress_labels=True,
+)
+instrumentator.instrument(app)
+
+# Set API info
+API_INFO.info({
+    'version': '1.0.0',
+    'environment': os.getenv('ENVIRONMENT', 'production'),
+})
+
+# Add metrics endpoint manually using prometheus_client
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from fastapi.responses import Response
+
+@app.get("/metrics", tags=["monitoring"], include_in_schema=True)
+async def metrics():
+    """Prometheus metrics endpoint."""
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST
+    )
 
 
 # ============== Models ==============
@@ -229,6 +326,14 @@ async def health_check():
     except Exception as e:
         lancedb_status = f"error: {str(e)}"
     
+    # Check FTS
+    fts_status = "ok" if fts_index else "unavailable"
+    
+    # Update Prometheus health gauges
+    COMPONENT_UP.labels(component="ollama").set(1 if ollama_status == "ok" else 0)
+    COMPONENT_UP.labels(component="lancedb").set(1 if lancedb_status == "ok" else 0)
+    COMPONENT_UP.labels(component="fts").set(1 if fts_index else 0)
+    
     # Get stats
     stats = {
         "work_vectors": 0,
@@ -252,6 +357,12 @@ async def health_check():
                 stats["personal_fts"] = 0
         else:
             stats["fts_available"] = False
+        
+        # Update index document gauges
+        INDEX_DOCUMENTS.labels(vault="work", index_type="vector").set(stats["work_vectors"])
+        INDEX_DOCUMENTS.labels(vault="personal", index_type="vector").set(stats["personal_vectors"])
+        INDEX_DOCUMENTS.labels(vault="work", index_type="fts").set(stats["work_fts"])
+        INDEX_DOCUMENTS.labels(vault="personal", index_type="fts").set(stats["personal_fts"])
     except:
         pass
     
@@ -260,6 +371,7 @@ async def health_check():
         components={
             "ollama": ollama_status,
             "lancedb": lancedb_status,
+            "fts": fts_status,
         },
         stats=stats
     )
@@ -280,6 +392,7 @@ async def search(request: SearchRequest):
     
     import time
     start = time.time()
+    mode = request.mode or "hybrid"
     
     results = await searcher.search(
         query=request.query,
@@ -287,10 +400,15 @@ async def search(request: SearchRequest):
         category=request.category,
         person=request.person,
         limit=request.limit,
-        mode=request.mode or "hybrid"
+        mode=mode
     )
     
-    duration_ms = int((time.time() - start) * 1000)
+    duration = time.time() - start
+    duration_ms = int(duration * 1000)
+    
+    # Record metrics
+    SEARCH_LATENCY.labels(mode=mode, vault=request.vault or "all").observe(duration)
+    SEARCH_RESULTS.labels(mode=mode).observe(len(results))
     
     return SearchResponse(
         results=results,
@@ -312,7 +430,11 @@ async def query(request: QueryRequest):
         vault=request.vault
     )
     
-    duration_ms = int((time.time() - start) * 1000)
+    duration = time.time() - start
+    duration_ms = int(duration * 1000)
+    
+    # Record metrics
+    RAG_LATENCY.labels(vault=request.vault or "all").observe(duration)
     
     return QueryResponse(
         answer=answer,

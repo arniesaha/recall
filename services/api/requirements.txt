@@ -23,3 +23,7 @@ markdown==3.5.2
 
 # Anthropic (for Claude)
 anthropic==0.18.1
+
+# Observability
+prometheus-fastapi-instrumentator==6.1.0
+prometheus-client==0.19.0
