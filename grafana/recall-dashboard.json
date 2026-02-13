@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "note-rag Personal Knowledge RAG System",
+  "description": "recall Personal Knowledge RAG System",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -233,7 +233,7 @@
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["note-rag", "rag", "knowledge-base"],
+  "tags": ["recall", "rag", "knowledge-base"],
   "templating": {
     "list": [
       {
@@ -255,8 +255,8 @@
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "note-rag - Personal Knowledge RAG",
-  "uid": "note-rag-dashboard",
+  "title": "Recall - Personal Knowledge System",
+  "uid": "recall-dashboard",
   "version": 1,
   "weekStart": ""
 }
