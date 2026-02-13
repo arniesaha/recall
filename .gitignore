@@ -49,3 +49,5 @@ analysis/
 # n8n workflow exports (may contain tokens)
 n8n/*.json
 !n8n/README.md
+ui/.env.production
+ui/.env.local
