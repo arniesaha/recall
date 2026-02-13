@@ -29,6 +29,9 @@ spec:
           readOnly: true
         - name: lancedb
           mountPath: /data/lancedb
+        - name: pdfs
+          mountPath: /data/pdfs
+          readOnly: true
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
         livenessProbe:
@@ -51,6 +54,10 @@ spec:
       - name: lancedb
         hostPath:
           path: {{ .Values.volumes.lancedb }}
+          type: DirectoryOrCreate
+      - name: pdfs
+        hostPath:
+          path: {{ .Values.volumes.pdfs }}
           type: DirectoryOrCreate
 ---
 {{- if .Values.ollama.enabled }}

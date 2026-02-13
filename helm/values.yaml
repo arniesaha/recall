@@ -1,19 +1,20 @@
-# note-rag Helm Values
+# Recall Helm Values
 
 replicaCount: 1
 
 image:
-  repository: localhost:5000/note-rag-api
+  repository: localhost:5000/recall-api
   tag: latest
   pullPolicy: Always
 
 service:
-  type: ClusterIP
+  type: NodePort
   port: 8080
+  nodePort: 30889  # For Cloudflare tunnel access
 
 ingress:
   enabled: true
-  host: kg.arnabsaha.com
+  host: recall.arnabsaha.com
 
 resources:
   limits:
@@ -23,8 +24,9 @@ resources:
 
 # Paths on the host
 volumes:
-  obsidian: /home/Arnab/clawd/projects/note-rag/obsidian
-  lancedb: /home/Arnab/clawd/projects/note-rag/lancedb
+  obsidian: /home/Arnab/clawd/projects/recall/obsidian
+  lancedb: /home/Arnab/clawd/projects/recall/lancedb
+  pdfs: /home/Arnab/clawd/projects/recall/data/pdfs
 
 # API Configuration
 config:

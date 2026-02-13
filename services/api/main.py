@@ -1,5 +1,5 @@
 """
-note-rag API
+Recall API
 Main FastAPI application
 """
 
@@ -129,7 +129,7 @@ async def lifespan(app: FastAPI):
     """Initialize services on startup."""
     global db, indexer, searcher, fts_index
     
-    logger.info("Starting note-rag API...")
+    logger.info("Starting Recall API...")
     
     # Connect to LanceDB
     logger.info(f"Connecting to LanceDB at {settings.lancedb_path}")
@@ -153,17 +153,17 @@ async def lifespan(app: FastAPI):
     # Initialize tables if needed
     await indexer.init_tables()
     
-    logger.info("note-rag API ready (hybrid search enabled)")
+    logger.info("Recall API ready (hybrid search enabled)")
     
     yield
     
-    logger.info("Shutting down note-rag API...")
+    logger.info("Shutting down Recall API...")
     if fts_index:
         fts_index.close()
 
 
 app = FastAPI(
-    title="note-rag API",
+    title="Recall API",
     description="Personal knowledge system with intelligent search",
     version="1.0.0",
     lifespan=lifespan

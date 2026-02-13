@@ -19,10 +19,15 @@ class Settings(BaseSettings):
     # LanceDB
     lancedb_path: str = "/data/lancedb"
     
-    # Vaults
+    # Vaults (Markdown)
     vault_work_path: str = "/data/obsidian/work"
     vault_personal_path: str = "/data/obsidian/personal"
     excluded_folders: str = "personal/finance"
+    
+    # PDFs
+    pdf_work_path: str = "/data/pdfs/work"
+    pdf_personal_path: str = "/data/pdfs/personal"
+    pdf_enabled: bool = True
     
     # Indexing
     chunk_size: int = 500

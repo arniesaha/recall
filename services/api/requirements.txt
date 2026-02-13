@@ -21,6 +21,9 @@ pydantic-settings==2.1.0
 # Markdown processing
 markdown==3.5.2
 
+# PDF processing
+PyMuPDF>=1.23.0
+
 # Anthropic (for Claude)
 anthropic==0.18.1
 

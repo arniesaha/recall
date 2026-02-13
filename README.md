@@ -1,23 +1,23 @@
-# note-rag
+# Recall 🧠
 
-A personal knowledge system for meeting transcripts, notes, and decisions. Features hybrid search (BM25 + vector), query expansion, LLM reranking, and RAG-powered answers.
+Your personal knowledge system. Search meeting transcripts, notes, decisions, and PDFs with AI-powered retrieval.
 
-Inspired by [Tobi Lütke's QMD](https://github.com/tobi/qmd), adapted as a Docker-based HTTP API.
+> *"What did we decide about X?" — answered in seconds.*
 
 ## Features
 
-- **Hybrid Search** — Combines BM25 keyword search with vector semantic search using RRF fusion
-- **Query Expansion** — LLM generates alternative phrasings to improve recall
-- **LLM Reranking** — Position-aware reranking for best result quality
-- **RAG Answers** — Natural language questions answered with context from your notes
+- **Hybrid Search** — BM25 keyword + vector semantic search with RRF fusion
+- **PDF Support** — Index PDFs with page-aware chunking
+- **RAG Answers** — Natural language questions answered with context
 - **1:1 Prep** — Quick context for meetings with specific people
-- **Action Items** — Extract action items from meeting transcripts
+- **Query Expansion** — LLM generates alternative phrasings
+- **LLM Reranking** — Position-aware reranking for quality
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      note-rag API                               │
+│                       Recall API                                │
 │                    (FastAPI + Python)                           │
 └─────────────────────────────────────────────────────────────────┘
         │                    │                    │
