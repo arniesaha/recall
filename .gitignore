@@ -51,3 +51,4 @@ n8n/*.json
 !n8n/README.md
 ui/.env.production
 ui/.env.local
+helm/values.yaml

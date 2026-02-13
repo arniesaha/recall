@@ -1,0 +1,21 @@
+# Copy to values.yaml and fill in your values
+replicaCount: 1
+
+image:
+  repository: localhost:5000/recall-api
+  tag: latest
+  pullPolicy: Always
+
+api:
+  apiToken: "your-api-token-here"
+  gpuOllamaUrl: "http://your-gpu-ip:11434"
+  gpuWolServerUrl: "http://your-nas-ip:9753"
+  gpuShutdownSecret: "your-shutdown-secret"
+
+ui:
+  image:
+    repository: localhost:5000/recall-ui
+    tag: latest
+
+ollama:
+  enabled: true
