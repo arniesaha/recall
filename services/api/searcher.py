@@ -3,12 +3,13 @@ Searcher module for note-rag
 Handles semantic search, hybrid search, and RAG queries
 
 v2: Added BM25 + Vector hybrid search with RRF fusion and reranking
+v3: Added name-aware hybrid boost for better person search
 """
 
 import os
 import re
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Set
 from pathlib import Path
 
 import httpx
@@ -20,6 +21,91 @@ from fts_index import FTSIndex
 from reranker import Reranker
 
 logger = logging.getLogger(__name__)
+
+
+# Common words to exclude from name detection
+COMMON_WORDS = {
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+    'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+    'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare', 'ought',
+    'used', 'what', 'who', 'which', 'when', 'where', 'why', 'how', 'all',
+    'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such',
+    'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+    'just', 'also', 'now', 'here', 'there', 'then', 'once', 'about', 'after',
+    'before', 'between', 'into', 'through', 'during', 'above', 'below',
+    # Query-specific words
+    'meeting', 'meetings', 'one-on-one', '1:1', 'prep', 'prepare', 'notes',
+    'summary', 'action', 'items', 'discussion', 'talked', 'discussed', 'said',
+    'mentioned', 'topic', 'topics', 'project', 'team', 'work', 'update',
+    'weekly', 'daily', 'monthly', 'review', 'feedback', 'performance',
+    # Common tech terms that might be capitalized
+    'API', 'UI', 'UX', 'SQL', 'AWS', 'GCP', 'PR', 'CI', 'CD',
+}
+
+
+def detect_names(query: str) -> Set[str]:
+    """
+    Detect likely person names in a query.
+    
+    Heuristics:
+    - Capitalized words that aren't at sentence start
+    - Words that aren't common English words
+    - Excludes known tech acronyms
+    
+    Returns:
+        Set of detected name tokens
+    """
+    names = set()
+    words = query.split()
+    
+    for i, word in enumerate(words):
+        # Clean the word
+        clean = re.sub(r'[^\w]', '', word)
+        if not clean:
+            continue
+        
+        # Check if capitalized (but not all caps like "API")
+        if clean[0].isupper() and not clean.isupper():
+            # Skip if it's a common word
+            if clean.lower() not in COMMON_WORDS:
+                # Skip if first word (might just be sentence start)
+                # Unless it looks like a name (short, no numbers)
+                if i > 0 or (len(clean) <= 15 and not any(c.isdigit() for c in clean)):
+                    names.add(clean)
+    
+    return names
+
+
+def has_person_query_intent(query: str) -> bool:
+    """
+    Detect if query is looking for information about a specific person.
+    
+    Signals:
+    - Contains phrases like "1:1", "one-on-one", "meeting with"
+    - Contains "prep for" or "prepare for"
+    - Contains a detected name
+    """
+    query_lower = query.lower()
+    
+    # Person-related patterns
+    person_patterns = [
+        r'\b1:1\b',
+        r'\bone[- ]on[- ]one\b',
+        r'\bmeeting with\b',
+        r'\bprep for\b',
+        r'\bprepare for\b',
+        r'\bcatch up with\b',
+        r'\bsync with\b',
+    ]
+    
+    for pattern in person_patterns:
+        if re.search(pattern, query_lower):
+            return True
+    
+    # Check for names
+    names = detect_names(query)
+    return len(names) > 0
 
 
 class Searcher:
@@ -154,22 +240,45 @@ class Searcher:
         Hybrid search combining BM25 + Vector using RRF fusion.
         
         This is the recommended search method for best quality.
+        
+        Name-aware boost: When query contains person names, BM25 is weighted
+        higher (3:1 ratio) because embedding models don't handle proper nouns well.
+        Also uses name-only search for BM25 to avoid FTS phrase matching issues.
         """
         import asyncio
         
+        # Detect if this is a person-focused query
+        detected_names = detect_names(query)
+        is_person_query = has_person_query_intent(query) or len(detected_names) > 0
+        
+        # For person queries, use just the name(s) for BM25 to avoid phrase matching issues
+        # e.g., "one-on-one with Nikhil" -> BM25 searches for "Nikhil"
+        if is_person_query and detected_names:
+            bm25_query = " ".join(detected_names)
+            logger.info(f"Person query detected. Names: {detected_names}, BM25 query: '{bm25_query}'")
+        else:
+            bm25_query = query
+        
         # Run BM25 and vector search in parallel
-        bm25_task = self.bm25_search(query, vault, person, limit=30)
+        bm25_task = self.bm25_search(bm25_query, vault, person, limit=30)
         vector_task = self.vector_search(query, vault, category, person, limit=30)
         
         bm25_results, vector_results = await asyncio.gather(bm25_task, vector_task)
         
-        logger.info(f"Hybrid search: BM25={len(bm25_results)}, Vector={len(vector_results)}")
+        logger.info(f"Hybrid search: BM25={len(bm25_results)}, Vector={len(vector_results)}, person_query={is_person_query}")
+        
+        # Build result lists for RRF fusion
+        # For person queries, add BM25 results multiple times to boost weight
+        if is_person_query and len(bm25_results) > 0:
+            # 3:1 BM25 to Vector ratio for name queries
+            result_lists = [bm25_results, bm25_results, bm25_results, vector_results]
+            logger.info("Using 3:1 BM25 boost for person query")
+        else:
+            # Standard 1:1 ratio
+            result_lists = [bm25_results, vector_results]
         
         # Fuse results using RRF
-        fused = reciprocal_rank_fusion(
-            [bm25_results, vector_results],
-            k=60
-        )
+        fused = reciprocal_rank_fusion(result_lists, k=60)
         
         # Normalize scores to 0-1
         fused = normalize_scores(fused)
