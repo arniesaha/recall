@@ -138,15 +138,13 @@ class FTSIndex:
     def _escape_fts_query(self, query: str) -> str:
         """
         Escape query for FTS5 to prevent syntax errors.
-        FTS5 interprets ':' as column specifier (e.g., "1:1" -> column "1" term "1").
-        Wrap terms in double quotes to treat as literal phrases.
+        FTS5 interprets special chars: ':' (column), '-' (NOT), '*' (prefix), etc.
+        Always wrap in double quotes to treat as literal phrase search.
         """
-        # If query contains special FTS5 characters, quote it
-        if any(c in query for c in [':', '*', '"', 'OR', 'AND', 'NOT', 'NEAR']):
-            # Escape existing quotes and wrap in quotes
-            escaped = query.replace('"', '""')
-            return f'"{escaped}"'
-        return query
+        # Always quote the query to prevent FTS5 syntax interpretation
+        # This treats the entire query as a literal phrase
+        escaped = query.replace('"', '""')
+        return f'"{escaped}"'
     
     def search(
         self,

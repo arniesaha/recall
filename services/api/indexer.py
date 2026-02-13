@@ -66,10 +66,27 @@ class Indexer:
         self.embedding_cache = {}
         self._cancel_requested = False
         self.fts_index = fts_index  # Optional FTS index for hybrid search
+        self._gpu_ollama_url = None  # Override URL when using GPU
+        self._embedding_batch_size = 10  # Batch size for embeddings
     
     def request_cancel(self):
         """Request cancellation of current indexing job."""
         self._cancel_requested = True
+    
+    def set_gpu_ollama_url(self, url: str):
+        """Set GPU Ollama URL for faster embeddings."""
+        self._gpu_ollama_url = url
+        logger.info(f"Using GPU Ollama at {url}")
+    
+    def clear_gpu_ollama_url(self):
+        """Clear GPU URL, fall back to default."""
+        self._gpu_ollama_url = None
+        logger.info("Cleared GPU Ollama URL, using default")
+    
+    @property
+    def ollama_url(self) -> str:
+        """Get the active Ollama URL (GPU if set, else default)."""
+        return self._gpu_ollama_url or self.settings.ollama_url
     
     async def init_tables(self):
         """Initialize LanceDB tables if they don't exist."""
@@ -86,7 +103,7 @@ class Indexer:
         logger.info("Tables initialized")
     
     async def get_embedding(self, text: str) -> List[float]:
-        """Get embedding from Ollama."""
+        """Get embedding from Ollama (single text)."""
         # Check cache
         cache_key = hashlib.md5(text.encode()).hexdigest()
         if cache_key in self.embedding_cache:
@@ -94,12 +111,12 @@ class Indexer:
         
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{self.settings.ollama_url}/api/embed",
+                f"{self.ollama_url}/api/embed",
                 json={
                     "model": self.settings.embedding_model,
                     "input": text
                 },
-                timeout=30.0
+                timeout=60.0
             )
             response.raise_for_status()
             data = response.json()
@@ -108,6 +125,52 @@ class Indexer:
         # Cache it
         self.embedding_cache[cache_key] = embedding
         return embedding
+    
+    async def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """Get embeddings for multiple texts in one API call (faster)."""
+        if not texts:
+            return []
+        
+        # Check cache for all texts, collect uncached
+        results = [None] * len(texts)
+        uncached_indices = []
+        uncached_texts = []
+        
+        for i, text in enumerate(texts):
+            cache_key = hashlib.md5(text.encode()).hexdigest()
+            if cache_key in self.embedding_cache:
+                results[i] = self.embedding_cache[cache_key]
+            else:
+                uncached_indices.append(i)
+                uncached_texts.append(text)
+        
+        # If all cached, return early
+        if not uncached_texts:
+            return results
+        
+        # Batch API call for uncached texts
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.ollama_url}/api/embed",
+                json={
+                    "model": self.settings.embedding_model,
+                    "input": uncached_texts  # Ollama supports list input
+                },
+                timeout=120.0  # Longer timeout for batches
+            )
+            response.raise_for_status()
+            data = response.json()
+            embeddings = data["embeddings"]
+        
+        # Fill in results and cache
+        for i, idx in enumerate(uncached_indices):
+            embedding = embeddings[i]
+            results[idx] = embedding
+            # Cache it
+            cache_key = hashlib.md5(uncached_texts[i].encode()).hexdigest()
+            self.embedding_cache[cache_key] = embedding
+        
+        return results
     
     def _chunk_document_sync(self, content: str, metadata: dict) -> List[Dict]:
         """Split document into chunks with overlap. (CPU-bound, runs in thread pool)"""
@@ -433,21 +496,27 @@ class Indexer:
         
         table = self.db.open_table(table_name)
         
-        # Generate embeddings and prepare records
+        if self._cancel_requested:
+            logger.info("PDF indexing cancelled")
+            return 0
+        
+        # Batch embed all PDF chunks at once
+        try:
+            chunk_texts = [chunk["content"][:8000] for chunk in chunks]
+            embeddings = await self.get_embeddings_batch(chunk_texts)
+        except Exception as e:
+            logger.error(f"Batch embedding failed for PDF {file_path}: {e}")
+            return 0
+        
+        # Prepare records with embeddings
         records = []
-        for chunk in chunks:
-            if self._cancel_requested:
-                logger.info("PDF indexing cancelled")
-                return len(records)
-            
+        for i, chunk in enumerate(chunks):
             try:
-                embedding = await self.get_embedding(chunk["content"][:8000])
-                
                 chunk_id = f"{chunk['file_hash']}_{chunk['chunk_index']}"
                 
                 records.append(DocumentChunk(
                     id=chunk_id,
-                    vector=embedding,
+                    vector=embeddings[i],
                     file_path=chunk["file_path"],
                     file_hash=chunk["file_hash"],
                     mtime=mtime,
@@ -463,7 +532,7 @@ class Indexer:
                     page_number=chunk.get("page_number")
                 ))
             except Exception as e:
-                logger.error(f"Error embedding PDF chunk {chunk['chunk_index']} of {file_path}: {e}")
+                logger.error(f"Error preparing PDF chunk {chunk['chunk_index']} of {file_path}: {e}")
         
         if records:
             # Delete existing chunks for this file
@@ -523,22 +592,28 @@ class Indexer:
         
         table = self.db.open_table(table_name)
         
-        # Generate embeddings and prepare records
+        # Check for cancellation
+        if self._cancel_requested:
+            logger.info("Indexing cancelled")
+            return 0
+        
+        # Batch embed all chunks at once (much faster!)
+        try:
+            chunk_texts = [chunk["content"][:8000] for chunk in chunks]
+            embeddings = await self.get_embeddings_batch(chunk_texts)
+        except Exception as e:
+            logger.error(f"Batch embedding failed for {file_path}: {e}")
+            return 0
+        
+        # Prepare records with embeddings
         records = []
-        for chunk in chunks:
-            # Check for cancellation
-            if self._cancel_requested:
-                logger.info("Indexing cancelled")
-                return len(records)
-            
+        for i, chunk in enumerate(chunks):
             try:
-                embedding = await self.get_embedding(chunk["content"][:8000])  # Limit input
-                
                 chunk_id = f"{chunk['file_hash']}_{chunk['chunk_index']}"
                 
                 records.append(DocumentChunk(
                     id=chunk_id,
-                    vector=embedding,
+                    vector=embeddings[i],
                     file_path=chunk["file_path"],
                     file_hash=chunk["file_hash"],
                     mtime=mtime,
@@ -554,7 +629,7 @@ class Indexer:
                     page_number=None
                 ))
             except Exception as e:
-                logger.error(f"Error embedding chunk {chunk['chunk_index']} of {file_path}: {e}")
+                logger.error(f"Error preparing chunk {chunk['chunk_index']} of {file_path}: {e}")
         
         if records:
             # Delete existing chunks for this file (by file_hash prefix)
@@ -601,8 +676,13 @@ class Indexer:
             vault_path
         )
     
-    async def full_reindex(self, vault: str = "all") -> int:
-        """Full reindex of vault(s). Non-blocking. Includes both Markdown and PDFs."""
+    async def full_reindex(self, vault: str = "all", progress_callback=None) -> int:
+        """Full reindex of vault(s). Non-blocking. Includes both Markdown and PDFs.
+        
+        Args:
+            vault: Which vault(s) to index ("all", "work", "personal")
+            progress_callback: Optional async callable(processed: int, total: int, current_file: str)
+        """
         self._cancel_requested = False
         total_indexed = 0
         
@@ -612,19 +692,53 @@ class Indexer:
         if vault in ["all", "personal"]:
             vaults_to_index.append(("personal", Path(self.settings.vault_personal_path), Path(self.settings.pdf_personal_path)))
         
+        # Pre-count all files for progress tracking
+        all_files = []
+        for table_name, vault_path, pdf_path in vaults_to_index:
+            md_files = await self.list_markdown_files(vault_path)
+            all_files.extend([(f, table_name, "markdown") for f in md_files])
+            if self.settings.pdf_enabled and PDF_ENABLED:
+                pdf_files = await self.list_pdf_files(pdf_path)
+                all_files.extend([(f, table_name, "pdf") for f in pdf_files])
+        
+        total_files = len(all_files)
+        processed_files = 0
+        logger.info(f"Full reindex starting: {total_files} total files")
+        
+        # Report initial progress
+        if progress_callback:
+            await progress_callback(0, total_files, "starting")
+        
         for table_name, vault_path, pdf_path in vaults_to_index:
             if self._cancel_requested:
                 break
                 
             logger.info(f"Full reindex of {table_name} vault...")
             
-            # Clear table
+            # Drop and recreate table to ensure schema is up-to-date
+            # This handles schema migrations (e.g., adding mtime column)
             try:
-                table = self.db.open_table(table_name)
-                # LanceDB doesn't have truncate, so we delete all
-                table.delete("id IS NOT NULL")
-            except:
-                pass
+                if table_name in self.db.table_names():
+                    logger.info(f"Dropping existing table '{table_name}' for schema refresh")
+                    self.db.drop_table(table_name)
+                logger.info(f"Creating table '{table_name}' with current schema")
+                self.db.create_table(table_name, schema=DocumentChunk)
+            except Exception as e:
+                logger.error(f"Error recreating table {table_name}: {e}")
+                # Fallback: try to clear existing table
+                try:
+                    table = self.db.open_table(table_name)
+                    table.delete("id IS NOT NULL")
+                except:
+                    pass
+            
+            # Clear FTS index for this vault
+            if self.fts_index:
+                try:
+                    logger.info(f"Clearing FTS index for vault '{table_name}'")
+                    self.fts_index.clear_vault(table_name)
+                except Exception as e:
+                    logger.warning(f"Error clearing FTS for {table_name}: {e}")
             
             # === INDEX MARKDOWN FILES ===
             md_files = await self.list_markdown_files(vault_path)
@@ -638,6 +752,11 @@ class Indexer:
                 
                 count = await self.index_file(md_file, table_name)
                 total_indexed += count
+                processed_files += 1
+                
+                # Report progress
+                if progress_callback and processed_files % 5 == 0:
+                    await progress_callback(processed_files, total_files, str(md_file))
                 
                 if i % 10 == 0:
                     await asyncio.sleep(0)
@@ -658,16 +777,25 @@ class Indexer:
                         
                         count = await self.index_pdf_file(pdf_file, table_name)
                         total_indexed += count
+                        processed_files += 1
+                        
+                        # Report progress
+                        if progress_callback:
+                            await progress_callback(processed_files, total_files, str(pdf_file))
                         
                         if i % 5 == 0:
                             await asyncio.sleep(0)
                             if i > 0:
                                 logger.info(f"PDF progress: {i}/{total_pdfs} files ({table_name})")
         
+        # Report completion
+        if progress_callback:
+            await progress_callback(total_files, total_files, "complete")
+        
         logger.info(f"Full reindex complete: {total_indexed} chunks (Markdown + PDF)")
         return total_indexed
     
-    async def incremental_index(self, vault: str = "all") -> int:
+    async def incremental_index(self, vault: str = "all", progress_callback=None) -> int:
         """
         Incremental index (only new/modified/deleted files). Non-blocking.
         Handles both Markdown and PDF files.

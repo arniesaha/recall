@@ -1,0 +1,13 @@
+[Unit]
+Description=WoL HTTP Server for GPU Offload
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+ExecStart=/usr/bin/python3 /path/to/wol-server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

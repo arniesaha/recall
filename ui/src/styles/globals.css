@@ -1,0 +1,170 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0d0d0d;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #262626;
+  --text-primary: #e5e5e5;
+  --text-secondary: #a3a3a3;
+  --accent: #3b82f6;
+  --accent-muted: #1d4ed8;
+  --border: #333333;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444444;
+}
+
+/* Focus ring */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Markdown content styles */
+.prose-recall {
+  @apply text-text-primary leading-relaxed;
+}
+
+.prose-recall h1 {
+  @apply text-2xl font-bold mb-4 mt-6 text-text-primary;
+}
+
+.prose-recall h2 {
+  @apply text-xl font-semibold mb-3 mt-5 text-text-primary;
+}
+
+.prose-recall h3 {
+  @apply text-lg font-semibold mb-2 mt-4 text-text-primary;
+}
+
+.prose-recall p {
+  @apply mb-4;
+}
+
+.prose-recall ul, .prose-recall ol {
+  @apply mb-4 pl-6;
+}
+
+.prose-recall ul {
+  @apply list-disc;
+}
+
+.prose-recall ol {
+  @apply list-decimal;
+}
+
+.prose-recall li {
+  @apply mb-1;
+}
+
+.prose-recall a {
+  @apply text-accent hover:underline;
+}
+
+.prose-recall code {
+  @apply bg-bg-tertiary px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.prose-recall pre {
+  @apply bg-bg-tertiary p-4 rounded-lg overflow-x-auto mb-4;
+}
+
+.prose-recall pre code {
+  @apply bg-transparent p-0;
+}
+
+.prose-recall blockquote {
+  @apply border-l-4 border-accent pl-4 italic my-4 text-text-secondary;
+}
+
+.prose-recall hr {
+  @apply border-border my-6;
+}
+
+.prose-recall table {
+  @apply w-full mb-4 border-collapse;
+}
+
+.prose-recall th, .prose-recall td {
+  @apply border border-border px-3 py-2 text-left;
+}
+
+.prose-recall th {
+  @apply bg-bg-tertiary font-semibold;
+}
+
+/* Checkbox styling for task lists */
+.prose-recall input[type="checkbox"] {
+  @apply mr-2 accent-accent;
+}
+
+/* Search input animation */
+.search-glow:focus-within {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 20px -5px var(--accent);
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Pulse animation for loading */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 1.5s ease-in-out infinite;
+}
+
+/* Slide down animation for expanding folders */
+@keyframes slideDown {
+  from { 
+    opacity: 0; 
+    transform: translateY(-8px);
+    max-height: 0;
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0);
+    max-height: 1000px;
+  }
+}
+
+.animate-slide-down {
+  animation: slideDown 0.15s ease-out;
+}

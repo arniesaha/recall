@@ -28,3 +28,23 @@ spec:
   - port: 11434
     targetPort: 11434
 {{- end }}
+---
+{{- if .Values.ui.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ui
+  labels:
+    app: {{ .Release.Name }}-ui
+spec:
+  type: {{ .Values.ui.service.type | default "ClusterIP" }}
+  selector:
+    app: {{ .Release.Name }}-ui
+  ports:
+  - name: http
+    port: {{ .Values.ui.service.port | default 80 }}
+    targetPort: 80
+    {{- if and (eq (.Values.ui.service.type | default "ClusterIP") "NodePort") .Values.ui.service.nodePort }}
+    nodePort: {{ .Values.ui.service.nodePort }}
+    {{- end }}
+{{- end }}

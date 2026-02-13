@@ -51,3 +51,16 @@ ollama:
       memory: 1Gi
   persistence:
     path: /home/Arnab/clawd/k8s-data/ollama
+
+# UI Frontend
+ui:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: localhost:5000/recall-ui
+    tag: latest
+    pullPolicy: Always
+  service:
+    type: NodePort
+    port: 80
+    nodePort: 30890
