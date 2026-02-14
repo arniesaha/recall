@@ -38,6 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
+SKIP_REORGANIZE = os.environ.get("SKIP_REORGANIZE", "true").lower() == "true"  # Skip by default (flat structure)
 WOL_SERVER_URL = os.environ.get("WOL_SERVER_URL", "http://192.168.1.70:9753")
 GPU_PC_MAC = os.environ.get("GPU_PC_MAC", "60:cf:84:cb:3f:aa")
 GPU_PC_IP = os.environ.get("GPU_PC_IP", "10.10.10.2")
@@ -218,8 +219,10 @@ def main():
     logger.info(f"🗓️  Daily Vault Sync - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     logger.info("=" * 60)
     
-    # Step 1: Reorganize vault
-    if not run_reorganize():
+    # Step 1: Reorganize vault (optional - skipped by default for flat structure)
+    if SKIP_REORGANIZE:
+        logger.info("⏭️  Skipping reorganization (SKIP_REORGANIZE=true)")
+    elif not run_reorganize():
         logger.error("Reorganization failed, aborting")
         return 1
     
