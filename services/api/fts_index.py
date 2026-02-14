@@ -139,12 +139,37 @@ class FTSIndex:
         """
         Escape query for FTS5 to prevent syntax errors.
         FTS5 interprets special chars: ':' (column), '-' (NOT), '*' (prefix), etc.
-        Always wrap in double quotes to treat as literal phrase search.
+        
+        Strategy:
+        - Single word: quote it for literal match
+        - Multiple words: join with OR for any-match (better for names)
+        - Remove special chars that break FTS5
         """
-        # Always quote the query to prevent FTS5 syntax interpretation
-        # This treats the entire query as a literal phrase
-        escaped = query.replace('"', '""')
-        return f'"{escaped}"'
+        import re
+        
+        # Remove FTS5 special chars that cause syntax errors
+        # Keep alphanumeric, spaces, and basic punctuation
+        cleaned = re.sub(r'[":*^~()]', ' ', query)
+        
+        # Split into words and filter empty
+        words = [w.strip() for w in cleaned.split() if w.strip()]
+        
+        if not words:
+            return '""'
+        
+        if len(words) == 1:
+            # Single word: quote for literal match, add prefix match for flexibility
+            return f'"{words[0]}" OR {words[0]}*'
+        
+        # Multiple words: OR them together for any-match
+        # Quote each word and also add prefix match
+        terms = []
+        for word in words:
+            # Add both exact and prefix match for each term
+            terms.append(f'"{word}"')
+            terms.append(f'{word}*')
+        
+        return " OR ".join(terms)
     
     def search(
         self,

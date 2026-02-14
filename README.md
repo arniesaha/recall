@@ -206,6 +206,14 @@ Blends retrieval scores with LLM reranker:
 - Top 4-10: 60% retrieval, 40% reranker
 - Top 11+: 40% retrieval, 60% reranker (trust reranker more)
 
+### Person-Aware Search
+
+When queries mention person names (detected via NLP), the search adjusts:
+
+- BM25 weight increases to 3:1 ratio (vs default 1:1)
+- Filename matches boosted (person names often in meeting titles)
+- FTS5 uses OR search with wildcards: `"John" OR John*`
+
 ## Project Structure
 
 ```
@@ -237,11 +245,62 @@ recall/
 ├── scripts/                  # Utility scripts
 │   ├── wol-server.py        # Wake-on-LAN HTTP server
 │   ├── gpu-shutdown-server.py
+│   ├── daily_vault_sync.py  # Daily sync orchestrator
+│   ├── reorganize_v2.py     # Vault reorganization (optional)
 │   └── GPU-SETUP.md
 └── docs/
     ├── GPU-OFFLOAD.md       # GPU setup guide
     └── UI-DESIGN-PLAN.md    # UI design docs
 ```
+
+## Vault Structure
+
+Recall indexes Markdown files from configured vaults. The recommended structure is **flat date-based naming**:
+
+```
+obsidian/
+├── work/
+│   ├── daily-notes/           # Meeting summaries (synced from Granola)
+│   │   ├── 2025-04-07-Team Standup.md
+│   │   ├── 2025-04-07-PM __ Arnab.md
+│   │   └── ...
+│   └── Granola/
+│       └── Transcripts/       # Raw meeting transcripts
+│           ├── 2025-04-07-Team Standup-transcript.md
+│           └── ...
+└── personal/
+    └── notes/                 # Personal notes
+```
+
+### Why Flat Structure?
+
+1. **Search works well** — BM25 finds person names in filenames, vector search finds semantic content
+2. **Simple sync** — Granola exports directly to flat folders
+3. **Date-based navigation** — Easy chronological browsing in the UI
+4. **No maintenance** — No need to reorganize files into person/project folders
+
+### Reorganization (Optional)
+
+The `scripts/reorganize_v2.py` script can analyze your vault and optionally create derived folders by person/project:
+
+```bash
+# Preview what would change (dry run)
+python3 scripts/reorganize_v2.py
+
+# Apply changes
+python3 scripts/reorganize_v2.py --apply
+```
+
+### Daily Sync
+
+The `scripts/daily_vault_sync.py` orchestrates a full reindex cycle:
+
+1. Run reorganization (if enabled)
+2. Wake GPU PC via Wake-on-LAN
+3. Trigger full reindex with GPU
+4. Shutdown GPU PC when done
+
+Configure as a cron job for automated daily syncs.
 
 ## Kubernetes Deployment
 
