@@ -232,9 +232,11 @@ def extract_query_without_temporal(query: str, date_range: Optional[DateRange]) 
         r'\b(?:past|last)\s+\d+\s+days?\b',
         r'\blast\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
         r'\bon\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
-        r'\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\b',
-        r'\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b',
-        r'\b(?:jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+\d{1,2}\b',
+        r'\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?\b',
+        r'\bfrom\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)(?:\s+\d{4})?\b',
+        r'\b(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+\d{4})?\b',
+        r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)(?:\s+\d{4})?\b',
+        r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\s+\d{1,2}(?:,?\s+\d{4})?\b',
         r'\b\d{4}-\d{2}-\d{2}\b',
     ]
     

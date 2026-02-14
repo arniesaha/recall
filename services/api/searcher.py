@@ -43,6 +43,15 @@ COMMON_WORDS = {
     'weekly', 'daily', 'monthly', 'review', 'feedback', 'performance',
     # Common tech terms that might be capitalized
     'API', 'UI', 'UX', 'SQL', 'AWS', 'GCP', 'PR', 'CI', 'CD',
+    # Month names (avoid treating "Jan" as person name)
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december',
+    'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec',
+    # Days of week
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun',
+    # Other common false positives
+    'highlights', 'summary', 'overview', 'report', 'analysis',
 }
 
 
