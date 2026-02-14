@@ -149,7 +149,8 @@ class FTSIndex:
         
         # Remove FTS5 special chars that cause syntax errors
         # Keep alphanumeric, spaces, and basic punctuation
-        cleaned = re.sub(r'[":*^~()]', ' ', query)
+        # Added: ? ! . , ; ' for common query punctuation
+        cleaned = re.sub(r'[":*^~()?!.,;\'\[\]{}]', ' ', query)
         
         # Split into words and filter empty
         words = [w.strip() for w in cleaned.split() if w.strip()]
@@ -176,10 +177,20 @@ class FTSIndex:
         query: str,
         vault: str = "all",
         limit: int = 30,
-        person: Optional[str] = None
+        person: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
     ) -> List[Dict]:
         """
         BM25 full-text search.
+        
+        Args:
+            query: Search query text
+            vault: Filter by vault ("all", "work", "personal")
+            limit: Max results to return
+            person: Filter by person name (partial match)
+            date_from: Start date filter (YYYY-MM-DD format, inclusive)
+            date_to: End date filter (YYYY-MM-DD format, inclusive)
         
         Returns list of results with:
         - file_path, title, vault, category, people, date
@@ -200,6 +211,15 @@ class FTSIndex:
         if person:
             where_parts.append("d.people LIKE ?")
             params.append(f"%{person}%")
+        
+        # Date range filtering
+        if date_from:
+            where_parts.append("d.date >= ?")
+            params.append(date_from)
+        
+        if date_to:
+            where_parts.append("d.date <= ?")
+            params.append(date_to)
         
         where_clause = " AND ".join(where_parts)
         params.append(limit)

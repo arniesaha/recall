@@ -1,6 +1,6 @@
 # Recall API Reference
 
-Base URL: `https://recall.arnabsaha.com` (external) or k8s internal ClusterIP
+Base URL: `https://<your-domain>/api` or k8s internal ClusterIP
 
 ## Authentication
 
@@ -42,7 +42,7 @@ Detailed health status including Ollama connectivity and index stats.
 ## Search Endpoints
 
 ### POST /search
-Semantic vector search across indexed documents.
+Hybrid search (BM25 + Vector) across indexed documents with automatic temporal parsing.
 
 **Request Body:**
 ```json
@@ -50,15 +50,21 @@ Semantic vector search across indexed documents.
   "query": "string",           // Required: search query
   "vault": "work|personal|all", // Optional, default: "all"
   "limit": 10,                 // Optional, default: 10
-  "mode": "vector|bm25|hybrid", // Optional, default: "vector"
-  "filters": {                 // Optional
-    "person": "string",        // Filter by person mentioned
-    "category": "string",      // Filter by category
-    "date_from": "YYYY-MM-DD", // Filter by date range
-    "date_to": "YYYY-MM-DD"
-  }
+  "mode": "vector|bm25|hybrid|query", // Optional, default: "hybrid"
+  "date_from": "YYYY-MM-DD",   // Optional: explicit date filter
+  "date_to": "YYYY-MM-DD",     // Optional: explicit date filter
+  "person": "string",          // Optional: filter by person
+  "category": "string"         // Optional: filter by category
 }
 ```
+
+**Temporal Parsing:**
+If `date_from`/`date_to` not provided, temporal expressions are auto-parsed:
+- "this week" → current week (Mon-today)
+- "last month" → previous month
+- "yesterday" → yesterday's date
+- "past 7 days" → last 7 days
+- "in January" → January of current/recent year
 
 **Response:**
 ```json
@@ -67,18 +73,18 @@ Semantic vector search across indexed documents.
     {
       "file_path": "/data/obsidian/work/meetings/...",
       "title": "Document Title",
-      "content": "Matching chunk content...",
+      "excerpt": "Matching snippet with <mark>highlights</mark>...",
       "score": 0.85,
       "vault": "work",
       "category": "meetings",
       "date": "2026-02-10",
-      "people": ["John", "Jane"],
-      "source_type": "markdown",   // or "pdf"
-      "page_number": null          // For PDFs: page number
+      "people": ["Alex", "Jordan"],
+      "source_type": "markdown",
+      "page_number": null
     }
   ],
   "total": 5,
-  "query": "original query"
+  "query_time_ms": 234
 }
 ```
 
@@ -88,9 +94,8 @@ RAG-powered query with LLM-generated answer.
 **Request Body:**
 ```json
 {
-  "query": "string",           // Required: question to answer
-  "vault": "work|personal|all", // Optional, default: "all"
-  "max_context": 5             // Optional: max chunks for context
+  "question": "string",        // Required: question to answer
+  "vault": "work|personal|all" // Optional, default: "all"
 }
 ```
 
@@ -104,7 +109,8 @@ RAG-powered query with LLM-generated answer.
       "title": "...",
       "relevance": 0.92
     }
-  ]
+  ],
+  "query_time_ms": 3456
 }
 ```
 
@@ -116,7 +122,7 @@ RAG-powered query with LLM-generated answer.
 Get context for 1:1 meeting preparation.
 
 **Path Parameters:**
-- `person`: Name of the person (e.g., "John")
+- `person`: Name of the person (e.g., "Alex")
 
 **Query Parameters:**
 - `limit`: Max documents (default: 10)
@@ -124,16 +130,18 @@ Get context for 1:1 meeting preparation.
 **Response:**
 ```json
 {
-  "person": "John",
+  "person": "Alex",
+  "meeting_count": 12,
+  "last_meeting": "2026-02-08",
+  "recent_topics": ["roadmap", "performance"],
+  "open_actions": ["Review PR by Friday"],
   "recent_meetings": [
     {
-      "title": "John _ Arnab",
+      "title": "Weekly 1:1",
       "date": "2026-02-08",
-      "summary": "..."
+      "file_path": "..."
     }
-  ],
-  "action_items": ["..."],
-  "topics_discussed": ["..."]
+  ]
 }
 ```
 
@@ -169,7 +177,7 @@ List indexing jobs.
   "jobs": [
     {
       "job_id": "uuid",
-      "status": "running|completed|error",
+      "status": "running|completed|failed",
       "vault": "work",
       "full": true,
       "started_at": "2026-02-13T10:20:11.532947",
@@ -179,12 +187,52 @@ List indexing jobs.
 }
 ```
 
+### GET /index/progress
+Get real-time indexing progress.
+
+**Response:**
+```json
+{
+  "running": true,
+  "processed": 150,
+  "total": 500,
+  "percent": 30.0,
+  "eta_human": "3m 20s",
+  "current_file": "meetings/2026-02-10.md",
+  "elapsed_seconds": 120
+}
+```
+
 ### POST /index/cancel/{job_id}
 Cancel a running indexing job.
 
 **Response:**
 ```json
 {"status": "cancelled"}
+```
+
+---
+
+## GPU Offload Endpoints
+
+### POST /index/gpu
+Trigger GPU-accelerated indexing (wakes GPU machine if needed).
+
+**Request Body:**
+```json
+{
+  "vault": "work|personal|all",
+  "full": false
+}
+```
+
+**Response:**
+```json
+{
+  "status": "started",
+  "gpu_status": "waking|ready",
+  "estimated_time": "5 minutes"
+}
 ```
 
 ---
@@ -218,7 +266,7 @@ Environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `API_TOKEN` | changeme | Authentication token |
+| `API_TOKEN` | (required) | Authentication token |
 | `OLLAMA_URL` | http://ollama:11434 | Ollama endpoint |
 | `LANCEDB_PATH` | /data/lancedb | Vector DB storage |
 | `VAULT_WORK_PATH` | /data/obsidian/work | Work vault path |
@@ -228,6 +276,7 @@ Environment variables:
 | `PDF_ENABLED` | true | Enable PDF indexing |
 | `CHUNK_SIZE` | 500 | Target tokens per chunk |
 | `CHUNK_OVERLAP` | 50 | Overlap between chunks |
+| `LOG_LEVEL` | INFO | Logging level |
 
 ---
 
@@ -242,23 +291,23 @@ FastAPI auto-generates OpenAPI spec at:
 
 ## Examples
 
-### Search for meeting notes about a person
+### Search for meeting notes with temporal filter
 ```bash
-curl -X POST "http://kg.arnabsaha.com/search" \
+curl -X POST "http://localhost:8080/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"query": "What did we discuss with John?", "filters": {"person": "John"}}'
+  -d '{"query": "What did we discuss this week?", "vault": "work"}'
 ```
 
 ### Get 1:1 prep context
 ```bash
-curl "http://kg.arnabsaha.com/prep/John?limit=5" \
+curl "http://localhost:8080/prep/Alex?limit=5" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Full reindex with PDFs
 ```bash
-curl -X POST "http://kg.arnabsaha.com/index/start" \
+curl -X POST "http://localhost:8080/index/start" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"full": true, "vault": "work"}'
@@ -266,8 +315,27 @@ curl -X POST "http://kg.arnabsaha.com/index/start" \
 
 ### Ask a question (RAG)
 ```bash
-curl -X POST "http://kg.arnabsaha.com/query" \
+curl -X POST "http://localhost:8080/query" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"query": "What are the key decisions from last week?"}'
+  -d '{"question": "What are the key decisions from last week?"}'
 ```
+
+---
+
+## Metrics
+
+Prometheus metrics available at `/metrics`:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `recall_search_latency_seconds` | Histogram | Search latency by mode |
+| `recall_search_results_count` | Histogram | Result count per search |
+| `recall_rag_query_latency_seconds` | Histogram | RAG query latency |
+| `recall_index_total_files` | Gauge | Total files to index |
+| `recall_index_processed_files` | Gauge | Files indexed so far |
+| `recall_index_progress_percent` | Gauge | Indexing progress % |
+
+---
+
+*Last updated: 2026-02-14*

@@ -250,6 +250,8 @@ class SearchRequest(BaseModel):
     person: Optional[str] = None
     limit: int = 10
     mode: Optional[str] = "hybrid"  # "vector", "bm25", "hybrid", "query"
+    date_from: Optional[str] = None  # YYYY-MM-DD format (auto-parsed from query if not set)
+    date_to: Optional[str] = None    # YYYY-MM-DD format (auto-parsed from query if not set)
 
 
 class SearchResult(BaseModel):
@@ -453,7 +455,9 @@ async def search(request: SearchRequest):
         category=request.category,
         person=request.person,
         limit=request.limit,
-        mode=mode
+        mode=mode,
+        date_from=request.date_from,
+        date_to=request.date_to
     )
     
     duration = time.time() - start

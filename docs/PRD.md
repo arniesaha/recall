@@ -1,9 +1,8 @@
-# Knowledge Graph — Product Requirements Document
+# Recall — Product Requirements Document
 
-**Version:** 1.0
-**Author:** Arnab + Nix
-**Date:** 2026-02-01
-**Status:** Draft — Pending Review
+**Version:** 1.1
+**Date:** 2026-02-14
+**Status:** Active
 
 ---
 
@@ -51,7 +50,7 @@ Build a **personal knowledge system** that:
 > As an EM, I want to quickly get context on a person before our 1:1, so I can have a more productive conversation.
 
 Acceptance Criteria:
-- Query "prep for 1:1 with Hitesh" returns recent topics, open action items, and discussion history
+- Query "prep for 1:1 with Alex" returns recent topics, open action items, and discussion history
 - Response includes links to source notes
 - Works within 5 seconds
 
@@ -66,7 +65,7 @@ Acceptance Criteria:
 > As an EM, I want to see open action items for my team, so nothing falls through the cracks.
 
 Acceptance Criteria:
-- Query "open action items for Suman" returns pending tasks
+- Query "open action items for Jordan" returns pending tasks
 - Grouped by date/meeting
 - Can filter by project
 
@@ -86,12 +85,20 @@ Acceptance Criteria:
 - Results indicate source vault
 - Can filter by vault if needed
 
+**US-6: Temporal Search**
+> As a user, I want to search for "meetings this week" and get only this week's results.
+
+Acceptance Criteria:
+- Natural language date expressions parsed automatically
+- Supports: today, yesterday, this week, last month, specific dates
+- Results filtered to correct date range
+
 ### 2.2 Future User Stories (v2)
 
-- **US-6:** Weekly digest of themes and patterns
-- **US-7:** Meeting prep suggestions based on calendar
-- **US-8:** Integration with Slack for quick queries
-- **US-9:** Voice query via mobile
+- **US-7:** Weekly digest of themes and patterns
+- **US-8:** Meeting prep suggestions based on calendar
+- **US-9:** Integration with Slack for quick queries
+- **US-10:** Voice query via mobile
 
 ---
 
@@ -99,54 +106,56 @@ Acceptance Criteria:
 
 ### 3.1 File Watcher & Restructurer
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| FR-1.1 | Watch work/ and personal/ folders for new/modified files | P0 |
-| FR-1.2 | Categorize files based on content and filename | P0 |
-| FR-1.3 | Move files to appropriate subfolders | P0 |
-| FR-1.4 | Add/update YAML frontmatter | P0 |
-| FR-1.5 | Extract entities (people, projects) from content | P1 |
-| FR-1.6 | Configurable watch interval (default: 5 min) | P1 |
+| ID | Requirement | Priority | Status |
+|----|-------------|----------|--------|
+| FR-1.1 | Watch work/ and personal/ folders for new/modified files | P0 | ✅ |
+| FR-1.2 | Categorize files based on content and filename | P0 | ✅ |
+| FR-1.3 | Move files to appropriate subfolders | P0 | ✅ |
+| FR-1.4 | Add/update YAML frontmatter | P0 | ⏸️ Skipped |
+| FR-1.5 | Extract entities (people, projects) from content | P1 | ✅ |
+| FR-1.6 | Configurable watch interval (default: 5 min) | P1 | ✅ |
 
 ### 3.2 Indexing Pipeline
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| FR-2.1 | Chunk documents by section/paragraph | P0 |
-| FR-2.2 | Generate embeddings using nomic-embed-text | P0 |
-| FR-2.3 | Store vectors in Qdrant with metadata | P0 |
-| FR-2.4 | Incremental indexing (only new/changed files) | P0 |
-| FR-2.5 | Full reindex capability | P1 |
-| FR-2.6 | Track indexing status per file | P1 |
+| ID | Requirement | Priority | Status |
+|----|-------------|----------|--------|
+| FR-2.1 | Chunk documents by section/paragraph | P0 | ✅ |
+| FR-2.2 | Generate embeddings using nomic-embed-text | P0 | ✅ |
+| FR-2.3 | Store vectors in LanceDB with metadata | P0 | ✅ |
+| FR-2.4 | Incremental indexing (only new/changed files) | P0 | ✅ |
+| FR-2.5 | Full reindex capability | P1 | ✅ |
+| FR-2.6 | Track indexing status per file | P1 | ✅ |
+| FR-2.7 | GPU offload for fast indexing | P2 | ✅ |
 
 ### 3.3 Query API
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| FR-3.1 | Semantic search across indexed content | P0 |
-| FR-3.2 | Filter by vault (work/personal) | P0 |
-| FR-3.3 | Filter by category (people, projects, etc.) | P0 |
-| FR-3.4 | Filter by date range | P1 |
-| FR-3.5 | Filter by person | P1 |
-| FR-3.6 | Return source file links | P0 |
+| ID | Requirement | Priority | Status |
+|----|-------------|----------|--------|
+| FR-3.1 | Semantic search across indexed content | P0 | ✅ |
+| FR-3.2 | Filter by vault (work/personal) | P0 | ✅ |
+| FR-3.3 | Filter by category (people, projects, etc.) | P0 | ✅ |
+| FR-3.4 | Filter by date range | P1 | ✅ |
+| FR-3.5 | Filter by person | P1 | ✅ |
+| FR-3.6 | Return source file links | P0 | ✅ |
+| FR-3.7 | Temporal expression parsing | P1 | ✅ |
 
 ### 3.4 RAG Answers
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| FR-4.1 | Generate natural language answers using Claude | P0 |
-| FR-4.2 | Include source citations in response | P0 |
-| FR-4.3 | Support follow-up questions (context retention) | P2 |
-| FR-4.4 | Configurable LLM (Claude/local) | P2 |
+| ID | Requirement | Priority | Status |
+|----|-------------|----------|--------|
+| FR-4.1 | Generate natural language answers using LLM | P0 | ✅ |
+| FR-4.2 | Include source citations in response | P0 | ✅ |
+| FR-4.3 | Support follow-up questions (context retention) | P2 | ⬜ |
+| FR-4.4 | Configurable LLM (Claude/local) | P2 | ⬜ |
 
 ### 3.5 Specialized Endpoints
 
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| FR-5.1 | `/prep/{person}` — 1:1 preparation context | P0 |
-| FR-5.2 | `/actions/{person}` — Open action items | P1 |
-| FR-5.3 | `/decisions` — Recent decisions log | P1 |
-| FR-5.4 | `/focus` — Weekly focus areas | P2 |
+| ID | Requirement | Priority | Status |
+|----|-------------|----------|--------|
+| FR-5.1 | `/prep/{person}` — 1:1 preparation context | P0 | ✅ |
+| FR-5.2 | `/actions/{person}` — Open action items | P1 | ⬜ |
+| FR-5.3 | `/decisions` — Recent decisions log | P1 | ⬜ |
+| FR-5.4 | `/focus` — Weekly focus areas | P2 | ⬜ |
 
 ---
 
@@ -154,38 +163,39 @@ Acceptance Criteria:
 
 ### 4.1 Performance
 
-| ID | Requirement | Target |
-|----|-------------|--------|
-| NFR-1.1 | Query response time | < 5 seconds |
-| NFR-1.2 | File categorization time | < 2 seconds/file |
-| NFR-1.3 | Embedding generation | < 3 seconds/file |
-| NFR-1.4 | Concurrent queries supported | 5 |
+| ID | Requirement | Target | Status |
+|----|-------------|--------|--------|
+| NFR-1.1 | Query response time | < 5 seconds | ✅ |
+| NFR-1.2 | File categorization time | < 2 seconds/file | ✅ |
+| NFR-1.3 | Embedding generation (GPU) | < 5 min full reindex | ✅ |
+| NFR-1.4 | Concurrent queries supported | 5 | ✅ |
 
 ### 4.2 Availability
 
-| ID | Requirement | Target |
-|----|-------------|--------|
-| NFR-2.1 | Service uptime | 99% (NAS uptime) |
-| NFR-2.2 | Auto-restart on failure | Yes |
-| NFR-2.3 | Graceful degradation if Ollama unavailable | Yes (search-only mode) |
+| ID | Requirement | Target | Status |
+|----|-------------|--------|--------|
+| NFR-2.1 | Service uptime | 99% (NAS uptime) | ✅ |
+| NFR-2.2 | Auto-restart on failure | Yes | ✅ |
+| NFR-2.3 | Graceful degradation if Ollama unavailable | Yes | ✅ |
 
 ### 4.3 Security & Privacy
 
-| ID | Requirement | Target |
-|----|-------------|--------|
-| NFR-3.1 | All data stays on NAS | Yes |
-| NFR-3.2 | No external API for embeddings | Yes (Ollama local) |
-| NFR-3.3 | Claude API only for answer generation | Configurable |
-| NFR-3.4 | API authentication | Bearer token |
+| ID | Requirement | Target | Status |
+|----|-------------|--------|--------|
+| NFR-3.1 | All data stays on NAS | Yes | ✅ |
+| NFR-3.2 | No external API for embeddings | Yes (Ollama local) | ✅ |
+| NFR-3.3 | LLM API only for answer generation | Configurable | ✅ |
+| NFR-3.4 | API authentication | Bearer token | ✅ |
 
 ### 4.4 Maintainability
 
-| ID | Requirement | Target |
-|----|-------------|--------|
-| NFR-4.1 | Containerized deployment | Yes |
-| NFR-4.2 | Configuration via environment variables | Yes |
-| NFR-4.3 | Structured logging | Yes |
-| NFR-4.4 | Health check endpoint | Yes |
+| ID | Requirement | Target | Status |
+|----|-------------|--------|--------|
+| NFR-4.1 | Containerized deployment | Yes | ✅ |
+| NFR-4.2 | Configuration via environment variables | Yes | ✅ |
+| NFR-4.3 | Structured logging | Yes | ✅ |
+| NFR-4.4 | Health check endpoint | Yes | ✅ |
+| NFR-4.5 | Prometheus metrics | Yes | ✅ |
 
 ---
 
@@ -206,10 +216,10 @@ Acceptance Criteria:
 |------------|---------|--------|
 | Obsidian vault on NAS | Content source | ✅ Ready |
 | Granola → Obsidian sync | Work content | ✅ Working |
-| Docker on NAS | Container runtime | ⬜ To verify |
-| Ollama | Embeddings | ⬜ To install |
-| LanceDB | Vector storage (embedded) | ⬜ To install (pip) |
-| Claude API (Clawdbot) | Answer generation | ✅ Available |
+| Docker/k8s on NAS | Container runtime | ✅ Working |
+| Ollama | Embeddings | ✅ Working |
+| LanceDB | Vector storage (embedded) | ✅ Working |
+| LLM API | Answer generation | ✅ Available |
 
 ---
 
@@ -217,23 +227,22 @@ Acceptance Criteria:
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| NAS CPU too slow for embeddings | Slow indexing | Medium | Batch process overnight; optimize chunk size |
-| Qdrant memory usage too high | NAS instability | Low | Limit collection size; use disk-backed storage |
-| Poor categorization accuracy | Manual cleanup needed | Medium | Improve classification rules; add manual override |
+| NAS CPU too slow for embeddings | Slow indexing | Medium | ✅ GPU offload implemented |
+| Vector DB memory usage too high | NAS instability | Low | ✅ Using LanceDB (file-based) |
+| Poor categorization accuracy | Manual cleanup needed | Medium | Improve classification rules |
 | Granola sync breaks | Missing new notes | Low | Monitor sync; alert on failures |
 
 ---
 
 ## 8. Timeline
 
-| Phase | Duration | Deliverables |
-|-------|----------|--------------|
-| Phase 1: Infrastructure | 1 week | Docker setup, Qdrant, Ollama on NAS |
-| Phase 2: Indexing | 1 week | Embedding pipeline, file watcher |
-| Phase 3: Query API | 1 week | Search endpoints, RAG integration |
-| Phase 4: Polish | 1 week | Specialized endpoints, error handling |
-
-**Total: ~4 weeks** (part-time, evenings/weekends)
+| Phase | Duration | Status |
+|-------|----------|--------|
+| Phase 1: Infrastructure | 1 week | ✅ Complete |
+| Phase 2: Indexing | 1 week | ✅ Complete |
+| Phase 3: Query API | 1 week | ✅ Complete |
+| Phase 4: UI | 1 week | ✅ MVP Complete |
+| Phase 5: Polish | Ongoing | 🔄 Active |
 
 ---
 
@@ -241,28 +250,14 @@ Acceptance Criteria:
 
 | Question | Decision |
 |----------|----------|
-| **UI needed for v1?** | No — API-only first, UI after APIs are stable |
-| **Reindex frequency?** | Incremental on file change + weekly full reindex (Sunday 3 AM) |
-| **Personal vault sensitivity?** | Exclude `personal/finance/` from Claude context |
-| **Backup strategy?** | Daily local backup of LanceDB folder, 7-day retention |
 | **Vector DB?** | LanceDB (embedded, file-based, easy backup) |
-
-## 10. Open Questions
-
-1. **Clawdbot integration** — Direct tool call or HTTP API?
-2. **Authentication** — Bearer token sufficient or need more?
-3. **Rate limiting** — Needed for single-user system?
-
----
-
-## 10. Approval
-
-| Role | Name | Date | Status |
-|------|------|------|--------|
-| Product Owner | Arnab | | ⬜ Pending |
-| Developer | Nix | 2026-02-01 | ✅ Ready |
+| **UI framework?** | React + Vite + TailwindCSS |
+| **Reindex frequency?** | Incremental on file change + daily full reindex |
+| **Search algorithm?** | Hybrid BM25 + Vector with RRF fusion |
+| **GPU offload?** | Yes, via WoL to dedicated GPU machine |
 
 ---
 
 *Document Version History:*
+- v1.1 (2026-02-14): Added temporal search, updated status
 - v1.0 (2026-02-01): Initial draft

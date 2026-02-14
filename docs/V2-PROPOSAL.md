@@ -1,4 +1,4 @@
-# Knowledge Graph v2 — Personal AI Knowledge Base
+# Recall v2 — Personal AI Knowledge Base
 
 **Created:** 2026-02-05
 **Status:** Proposal / Ideation
@@ -6,7 +6,7 @@
 
 ---
 
-## Current State (v1)
+## Current State (v1) ✅
 
 ### Architecture
 ```
@@ -19,19 +19,22 @@ Data Sources → Embeddings → Vector Search → API
 ```
 
 ### Capabilities
-- ✅ Semantic search across 3,000+ files
-- ✅ Basic RAG (question → search → Claude answer)
+- ✅ Hybrid search (BM25 + Vector) across 20k+ files
+- ✅ RAG with LLM-generated answers
 - ✅ 1:1 prep endpoint (`/prep/{person}`)
-- ✅ Daily sync from Granola transcripts
-- ✅ ~280-750ms query time
+- ✅ Temporal search ("this week", "last month")
+- ✅ Person-aware search with name detection
+- ✅ PDF support with page citations
+- ✅ GPU offload for fast indexing
+- ✅ React UI for search and browsing
+- ✅ ~200-500ms query time
 
-### Limitations
-- API-only (no chat interface)
-- Single-turn queries (no conversation memory)
-- Only Obsidian/Granola data sources
-- No proactive insights
-- No entity relationships (documents only, no graph)
-- No hybrid search (vector only, no keyword)
+### Already Implemented Since Original Proposal
+- Hybrid search (BM25 + Vector with RRF)
+- Temporal expression parsing
+- FTS5 index for keyword search
+- Person query boost (3:1 BM25 ratio)
+- Web UI with note viewer
 
 ---
 
@@ -51,15 +54,15 @@ Transform from a search API into a **conversational AI assistant** that:
 
 **Current:**
 ```bash
-curl -X POST /query -d '{"question": "What did I discuss with Hitesh?"}'
+curl -X POST /query -d '{"question": "What did I discuss with Alex?"}'
 # Returns answer, no follow-up possible
 ```
 
 **Proposed:**
 ```
-You: "What did I discuss with Hitesh last month?"
-AI:  "You had 3 meetings with Hitesh in January:
-      - Jan 8: Iceberg migration timeline
+You: "What did I discuss with Alex last month?"
+AI:  "You had 3 meetings with Alex in January:
+      - Jan 8: Migration timeline
       - Jan 15: Team resourcing
       - Jan 22: Q1 planning"
 
@@ -81,6 +84,7 @@ AI:  "Based on those meetings, the open items are:
 **Current sources:**
 - Obsidian notes
 - Granola transcripts
+- PDFs
 
 **Proposed additional sources:**
 
@@ -88,10 +92,9 @@ AI:  "Based on those meetings, the open items are:
 |--------|-----------|-------------|
 | Slack | Messages, threads | Export + incremental API |
 | GitHub | Issues, PRs, comments | API polling |
-| Calendar | Events, attendees | Google Calendar API |
-| Email | Summaries (not full text) | Gmail API or manual export |
+| Calendar | Events, attendees | Calendar API |
+| Email | Summaries (not full text) | API or manual export |
 | Browser | Bookmarks, reading list | Export |
-| Twitter/X | Bookmarks, likes | Export |
 
 **Architecture:**
 ```
@@ -118,28 +121,28 @@ AI:  "Based on those meetings, the open items are:
 
 **Current:**
 ```
-Query → Embed → Vector Search → Top-K → LLM Answer
+Query → Parse Temporal → Hybrid Search → Top-K → LLM Answer
 ```
 
 **Proposed:**
 ```
 Query → Expand → Hybrid Search → Re-rank → Synthesize
          │           │              │           │
-    Query        Semantic +     Cross-encoder  Claude
+    Query        Semantic +     Cross-encoder  LLM
     expansion    BM25 keyword   scoring        with
-    (synonyms,   fusion                        citations
+    (synonyms,   fusion (done)                 citations
     related
     terms)
 ```
 
 **Components:**
 
-| Component | Purpose | Tech |
-|-----------|---------|------|
-| Query Expansion | Improve recall | LLM-based or thesaurus |
-| Hybrid Search | Best of both worlds | BM25 (tantivy) + vector |
-| Re-ranking | Precision boost | Cross-encoder (ms-marco-MiniLM) |
-| Citations | Source attribution | Return doc refs with answer |
+| Component | Purpose | Status |
+|-----------|---------|--------|
+| Query Expansion | Improve recall | ⬜ Proposed |
+| Hybrid Search | Best of both worlds | ✅ Done |
+| Re-ranking | Precision boost | ⬜ Proposed |
+| Citations | Source attribution | ✅ Done |
 
 ---
 
@@ -149,12 +152,12 @@ Enable multi-step reasoning and task execution.
 
 **Example: Meeting Prep Agent**
 ```
-User: "Prepare me for my 1:1 with Suman tomorrow"
+User: "Prepare me for my 1:1 with Jordan tomorrow"
 
 Agent thinks:
-├── Search recent interactions with Suman
-├── Find open action items assigned to/from Suman
-├── Check Suman's recent PRs/commits (GitHub)
+├── Search recent interactions with Jordan
+├── Find open action items assigned to/from Jordan
+├── Check Jordan's recent PRs/commits (GitHub)
 ├── Pull tomorrow's calendar context
 ├── Look for any mentions in team channels
 └── Generate prep doc with:
@@ -188,11 +191,11 @@ Move from document-centric to entity-centric.
 
 **Proposed (entities + relationships):**
 ```
-[Hitesh] ──works_on──────► [Iceberg Migration]
+[Alex] ──works_on──────► [Migration Project]
     │                            │
  reports_to                  blocked_by
     │                            │
-[Arnab] ◄──discussed_in───► [Q1 Planning Meeting]
+[Manager] ◄──discussed_in──► [Q1 Planning Meeting]
     │
  assigned
     │
@@ -225,12 +228,7 @@ Move from document-centric to entity-centric.
 - [ ] Context windowing (last N turns)
 - [ ] Session management
 
-### Phase 2c: Hybrid Search (2-3 days)
-- [ ] Add BM25 index (tantivy-py or rank_bm25)
-- [ ] Implement score fusion (RRF)
-- [ ] Compare quality vs pure vector
-
-### Phase 2d: Re-ranking (1-2 days)
+### Phase 2c: Re-ranking (1-2 days)
 - [ ] Add cross-encoder model
 - [ ] Re-rank top-K results
 - [ ] Measure latency impact
@@ -257,7 +255,7 @@ Move from document-centric to entity-centric.
 | Phase | New Skills |
 |-------|------------|
 | 2a-2b | Conversational AI, session management |
-| 2c-2d | Hybrid search, re-ranking, IR fundamentals |
+| 2c | Re-ranking, cross-encoders |
 | 3a | API integrations, incremental sync |
 | 3b | NER, relationship extraction, graph modeling |
 | 4a | Agent orchestration, tool use, LangGraph |
@@ -268,25 +266,30 @@ Move from document-centric to entity-centric.
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Query latency | 280-750ms | <500ms p95 |
+| Query latency | 200-500ms | <500ms p95 |
 | Search relevance | Good | Measurably better (eval set) |
-| Data sources | 2 | 5+ |
+| Data sources | 3 | 5+ |
 | Use frequency | API calls | Daily conversations |
 | Prep quality | Basic | Comprehensive briefs |
 
 ---
 
-## Recommended Starting Point
+## Recommended Next Steps
 
-**Start with Phase 2a + 2b: Chat Interface with Memory**
+**Option A: Chat Interface**
+- Add conversational UI
+- Multi-turn memory
+- Foundation for agents
 
-Why:
-1. Immediately useful (talk to your knowledge base)
-2. Low complexity (builds on existing API)
-3. Teaches conversation management patterns
-4. Foundation for agent work later
+**Option B: More Sources**
+- GitHub integration
+- Slack export
+- Broader knowledge base
 
-**Estimated time:** 3-5 days
+**Option C: Entity Extraction**
+- Extract people, projects, decisions
+- Build relationship graph
+- Enable "who knows about X?" queries
 
 ---
 
@@ -301,3 +304,4 @@ Why:
 ---
 
 *This document captures the v2 vision. Update as decisions are made.*
+*Last updated: 2026-02-14*

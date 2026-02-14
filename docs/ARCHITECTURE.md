@@ -1,8 +1,8 @@
-# Knowledge Graph — Architecture Document
+# Recall — Architecture Document
 
-**Version:** 1.0
-**Date:** 2026-02-01
-**Status:** Draft — Pending Review
+**Version:** 1.1
+**Date:** 2026-02-14
+**Status:** Active
 
 ---
 
@@ -11,56 +11,53 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                   NAS                                        │
-│                            192.168.1.70                                      │
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                         Docker Compose                               │   │
+│  │                         Kubernetes (k3s)                            │   │
 │  │                                                                      │   │
 │  │   ┌─────────────┐                       ┌─────────────────────┐    │   │
-│  │   │   Ollama    │                       │    Knowledge API    │    │   │
+│  │   │   Ollama    │                       │    Recall API       │    │   │
 │  │   │   (CPU)     │                       │     (FastAPI)       │    │   │
 │  │   │             │                       │                     │    │   │
 │  │   │ nomic-embed │◄─────────────────────►│  /search           │    │   │
-│  │   │    :11434   │                       │  /prep/{person}    │    │   │
 │  │   │             │                       │  /query            │    │   │
-│  │   └─────────────┘                       │  /restructure      │    │   │
-│  │                                         │  /index            │    │   │
+│  │   │             │                       │  /prep/{person}    │    │   │
+│  │   └─────────────┘                       │  /index            │    │   │
 │  │                                         │  /health           │    │   │
-│  │                                         │    :8080           │    │   │
-│  │                                         └──────────┬──────────┘    │   │
-│  └─────────────────────────────────────────────────────┼───────────────┘   │
-│                                                        │                    │
-│  ┌─────────────────────────────────────────────────────┼───────────────┐   │
-│  │                        File System                  │               │   │
-│  │                                                     │               │   │
-│  │   /home/Arnab/clawd/projects/knowledge-graph/          │               │   │
-│  │   ├── obsidian/                                     │               │   │
-│  │   │   ├── work/          (1,247 files)             │               │   │
-│  │   │   │   ├── people/                              │ File Watcher  │   │
-│  │   │   │   ├── projects/                            │ (watchdog)    │   │
-│  │   │   │   ├── team/                                │               │   │
-│  │   │   │   └── ...                                  │               │   │
-│  │   │   └── personal/      (65 files)                │               │   │
-│  │   │       ├── health/                              │               │   │
-│  │   │       ├── finance/   ⛔ (excluded from Claude) │               │   │
-│  │   │       └── ...                                  │               │   │
-│  │   │                                                │               │   │
-│  │   └── lancedb/           (embedded vector DB)      │               │   │
-│  │       ├── work.lance/    (~10k vectors)       ◄────┘               │   │
-│  │       └── personal.lance/ (~500 vectors)                           │   │
+│  │   ┌─────────────┐                       │                     │    │   │
+│  │   │ Recall UI   │◄─────────────────────►│    :8080           │    │   │
+│  │   │  (React)    │                       └──────────┬──────────┘    │   │
+│  │   │    :80      │                                  │               │   │
+│  │   └─────────────┘                                  │               │   │
+│  └────────────────────────────────────────────────────┼───────────────┘   │
+│                                                       │                    │
+│  ┌────────────────────────────────────────────────────┼───────────────┐   │
+│  │                        File System                 │               │   │
+│  │                                                    │               │   │
+│  │   /data/                                           │               │   │
+│  │   ├── obsidian/                                    │               │   │
+│  │   │   ├── work/        (meeting notes, 1:1s)      │ File Watcher  │   │
+│  │   │   │   ├── daily-notes/                        │ (incremental) │   │
+│  │   │   │   └── Granola/Transcripts/                │               │   │
+│  │   │   └── personal/    (personal notes)           │               │   │
+│  │   │                                               │               │   │
+│  │   ├── pdfs/            (PDF documents)            │               │   │
+│  │   │   ├── work/                                   │               │   │
+│  │   │   └── personal/                               │               │   │
+│  │   │                                               │               │   │
+│  │   └── lancedb/         (vector database)     ◄────┘               │   │
+│  │       ├── work/        (~20k vectors)                             │   │
+│  │       └── personal/    (~100 vectors)                             │   │
 │  │                                                                    │   │
 │  └────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
-                                      │ HTTP (localhost)
+                                      │ HTTPS (Cloudflare Tunnel)
                                       ▼
                           ┌─────────────────────┐
-                          │   Clawdbot Gateway  │
-                          │   :18789             │
-                          │                     │
-                          │   POST /api/chat    │
-                          │   (routes to Claude)│
+                          │   External Access   │
+                          │   recall.domain.com │
                           └─────────────────────┘
 ```
 
@@ -72,20 +69,6 @@
 
 **Purpose:** Generate vector embeddings for documents and queries
 
-**Configuration:**
-```yaml
-image: ollama/ollama:latest
-ports: ["11434:11434"]
-volumes:
-  - ollama_data:/root/.ollama
-environment:
-  - OLLAMA_HOST=0.0.0.0
-deploy:
-  resources:
-    limits:
-      memory: 2G
-```
-
 **Model:** `nomic-embed-text`
 - 137M parameters
 - 768-dimension vectors
@@ -94,7 +77,7 @@ deploy:
 
 **API:**
 ```bash
-POST http://localhost:11434/api/embed
+POST http://ollama:11434/api/embed
 {
   "model": "nomic-embed-text",
   "input": "text to embed"
@@ -113,107 +96,89 @@ POST http://localhost:11434/api/embed
 - Fast vector search with filtering
 - Simple Python API
 
-**Installation:**
-```bash
-pip install lancedb
-```
-
 **Tables:**
 
-| Table | Content | Est. Vectors | Location |
-|-------|---------|--------------|----------|
-| `work` | Work vault chunks | ~10,000 | `lancedb/work.lance/` |
-| `personal` | Personal vault chunks | ~500 | `lancedb/personal.lance/` |
+| Table | Content | Est. Vectors |
+|-------|---------|--------------|
+| `work` | Work vault chunks | ~20,000 |
+| `personal` | Personal vault chunks | ~100 |
 
 **Schema:**
 ```python
-import lancedb
-from lancedb.pydantic import LanceModel, Vector
-
 class DocumentChunk(LanceModel):
     id: str                    # Unique chunk ID
     vector: Vector(768)        # nomic-embed-text dimension
     file_path: str
+    file_hash: str             # MD5 for change detection
+    mtime: float               # Modification timestamp
     title: str
-    category: str              # people, projects, team, etc.
+    category: str              # daily-notes, Granola, etc.
     people: list[str]          # Mentioned people
     projects: list[str]        # Mentioned projects
-    date: str                  # ISO date
+    date: str                  # YYYY-MM-DD format
     vault: str                 # "work" or "personal"
     chunk_index: int
     content: str               # Actual text content
-
-# Usage
-db = lancedb.connect("./lancedb")
-table = db.create_table("work", schema=DocumentChunk)
-```
-
-**Backup:**
-```bash
-# Daily backup - just copy the folder
-cp -r ./lancedb ./backups/lancedb_$(date +%Y%m%d)
+    source_type: str           # "markdown" or "pdf"
+    page_number: int | None    # PDF page (1-indexed)
 ```
 
 ---
 
-### 2.3 Knowledge API (FastAPI)
+### 2.3 Recall API (FastAPI)
 
 **Purpose:** Main application service
 
-**Configuration:**
-```yaml
-build: ./api
-ports: ["8080:8080"]
-volumes:
-  - /home/Arnab/clawd/projects/knowledge-graph/obsidian:/data/obsidian
-  - /home/Arnab/clawd/projects/knowledge-graph/lancedb:/data/lancedb
-  - ./config:/app/config
-environment:
-  - OLLAMA_URL=http://ollama:11434
-  - LANCEDB_PATH=/data/lancedb
-  - VAULT_WORK_PATH=/data/obsidian/work
-  - VAULT_PERSONAL_PATH=/data/obsidian/personal
-  - CLAWDBOT_URL=http://host.docker.internal:18789
-  - CLAWDBOT_TOKEN=${CLAWDBOT_TOKEN}
-  - EXCLUDED_FOLDERS=personal/finance
-  - LOG_LEVEL=INFO
-depends_on:
-  - ollama
-extra_hosts:
-  - "host.docker.internal:host-gateway"
-```
-
-**Endpoints:**
+**Key Endpoints:**
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check |
-| `/search` | POST | Semantic search across vaults |
+| `/search` | POST | Hybrid search (BM25 + Vector) |
 | `/query` | POST | RAG query with LLM answer |
 | `/prep/{person}` | GET | 1:1 preparation context |
-| `/actions` | GET | Open action items |
-| `/restructure` | POST | Trigger file reorganization |
-| `/index` | POST | Trigger reindexing |
-| `/stats` | GET | Index statistics |
+| `/index/start` | POST | Trigger indexing job |
+| `/index/progress` | GET | Real-time indexing progress |
+
+**Features:**
+- Temporal expression parsing ("this week", "last month")
+- Person-aware search with BM25 boost
+- PDF support with page-aware chunking
+- Prometheus metrics
 
 ---
 
-### 2.4 File Watcher
+### 2.4 Recall UI (React)
 
-**Purpose:** Detect new/modified files and trigger processing
+**Purpose:** Web interface for search and browsing
 
-**Implementation:** Built into Knowledge API using `watchdog` library
+**Features:**
+- Natural language search
+- AI-generated answers with sources
+- Note viewer with markdown rendering
+- Folder browsing
+- Mobile responsive
 
-**Behavior:**
-1. Watch `work/` and `personal/` directories
-2. On new file detected:
-   - Categorize based on content/filename
-   - Move to appropriate subfolder
-   - Add frontmatter if missing
-   - Queue for indexing
-3. On modified file:
-   - Re-index affected chunks
-4. Debounce: 30 seconds (avoid processing during active sync)
+**Tech Stack:**
+- React 18 + Vite
+- TailwindCSS
+- React Query
+
+---
+
+### 2.5 FTS Index (SQLite FTS5)
+
+**Purpose:** Keyword search for hybrid retrieval
+
+**Why FTS5:**
+- Fast BM25 ranking
+- Handles names better than embeddings
+- Complements semantic search
+
+**Integration:**
+- Maintained alongside LanceDB
+- Updated incrementally with new documents
+- Used in hybrid search with 3:1 BM25 boost for person queries
 
 ---
 
@@ -224,15 +189,15 @@ extra_hosts:
 ```
 ┌────────────┐     ┌────────────┐     ┌────────────┐     ┌────────────┐
 │  Granola   │────▶│  Obsidian  │────▶│    NAS     │────▶│   File     │
-│  Meeting   │     │   Plugin   │     │   Vault    │     │  Watcher   │
+│  Meeting   │     │   Sync     │     │   Vault    │     │  Watcher   │
 └────────────┘     └────────────┘     └────────────┘     └─────┬──────┘
                                                                │
      ┌─────────────────────────────────────────────────────────┘
      │
      ▼
 ┌────────────┐     ┌────────────┐     ┌────────────┐     ┌────────────┐
-│ Categorize │────▶│   Chunk    │────▶│   Embed    │────▶│   Store    │
-│ & Move     │     │  Content   │     │  (Ollama)  │     │  (Qdrant)  │
+│  Extract   │────▶│   Chunk    │────▶│   Embed    │────▶│   Store    │
+│  Metadata  │     │  Content   │     │  (Ollama)  │     │  (Lance)   │
 └────────────┘     └────────────┘     └────────────┘     └────────────┘
 ```
 
@@ -240,383 +205,148 @@ extra_hosts:
 
 ```
 ┌────────────┐     ┌────────────┐     ┌────────────┐     ┌────────────┐
-│   User     │────▶│  Embed     │────▶│  Vector    │────▶│  Retrieve  │
-│   Query    │     │  Query     │     │  Search    │     │  Top-K     │
+│   User     │────▶│  Parse     │────▶│  Hybrid    │────▶│  Retrieve  │
+│   Query    │     │  Temporal  │     │  Search    │     │  Top-K     │
 └────────────┘     └────────────┘     └────────────┘     └─────┬──────┘
                                                                │
      ┌─────────────────────────────────────────────────────────┘
      │
      ▼
 ┌────────────┐     ┌────────────┐     ┌────────────┐
-│  Build     │────▶│  Claude    │────▶│  Return    │
+│  Build     │────▶│    LLM     │────▶│  Return    │
 │  Context   │     │  Generate  │     │  Answer    │
 └────────────┘     └────────────┘     └────────────┘
 ```
+
+### 3.3 Search Algorithm
+
+**Hybrid Search with RRF Fusion:**
+1. Parse temporal expressions from query
+2. Run BM25 search (keyword matching)
+3. Run Vector search (semantic matching)
+4. Fuse results using Reciprocal Rank Fusion
+5. Optional: Rerank with small LLM
+
+**Person Query Boost:**
+When names detected in query:
+- BM25 weighted 3:1 vs Vector
+- Name-only search for BM25 (avoids phrase matching issues)
 
 ---
 
 ## 4. Directory Structure
 
 ```
-knowledge-graph/
+recall/
 ├── docs/                        # Project documentation
 │   ├── PRD.md
 │   ├── ARCHITECTURE.md
-│   └── SPEC.md
-├── obsidian/
-│   ├── work/                    # Work vault (synced from Granola)
-│   │   ├── people/
-│   │   ├── projects/
-│   │   ├── team/
-│   │   ├── incidents/
-│   │   ├── interviews/
-│   │   ├── insights/
-│   │   └── reference/
-│   ├── personal/                # Personal vault
-│   │   ├── health/
-│   │   ├── finance/             # ⛔ Excluded from Claude
-│   │   ├── immigration/
-│   │   └── misc/
-│   └── vault/                   # Original source (backup)
-├── lancedb/                     # Vector database (file-based)
-│   ├── work.lance/
-│   └── personal.lance/
-├── services/                    # Docker services
-│   ├── docker-compose.yml
-│   ├── api/
+│   ├── API.md
+│   └── UI-DESIGN-PLAN.md
+├── data/                        # Data volumes (mounted)
+│   ├── obsidian/
+│   │   ├── work/
+│   │   └── personal/
+│   ├── pdfs/
+│   │   ├── work/
+│   │   └── personal/
+│   └── lancedb/
+├── services/
+│   ├── api/                     # FastAPI backend
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
 │   │   ├── main.py
 │   │   ├── indexer.py
 │   │   ├── searcher.py
-│   │   ├── restructurer.py
-│   │   └── watcher.py
-│   └── config/
-│       └── settings.yaml
+│   │   ├── temporal.py          # Temporal expression parsing
+│   │   ├── fts_index.py         # BM25 search
+│   │   ├── fusion.py            # RRF fusion
+│   │   └── config.py
+│   └── ui/                      # React frontend
+│       ├── Dockerfile
+│       ├── package.json
+│       └── src/
+├── helm/                        # Kubernetes deployment
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   └── templates/
 ├── scripts/                     # Utility scripts
-│   ├── analyze_meetings.py
-│   ├── reorganize_vault.py
-│   └── generate_insights.py
-├── backups/                     # Daily LanceDB backups
-│   └── lancedb_YYYYMMDD/
-├── analysis/                    # Analysis outputs
-│   └── meetings_analysis.json
-├── workflows/                   # n8n job search workflow
+│   ├── daily_vault_sync.py
+│   └── gpu_offload.py
 └── README.md
 ```
 
 ---
 
-## 5. API Specification
+## 5. Deployment
 
-### 5.1 Search
+### 5.1 Kubernetes (k3s)
 
-```http
-POST /search
-Content-Type: application/json
-Authorization: Bearer {token}
+**Services:**
+- `recall` - API deployment (NodePort 30889)
+- `recall-ui` - UI deployment (NodePort 30890)
+- `recall-ollama` - Ollama sidecar (optional, can use external)
 
-{
-  "query": "migration timeline",
-  "vault": "work",           // Optional: "work", "personal", "all"
-  "category": "projects",    // Optional filter
-  "person": "Sriram",        // Optional filter
-  "date_from": "2026-01-01", // Optional filter
-  "limit": 10
-}
-```
-
-**Response:**
-```json
-{
-  "results": [
-    {
-      "score": 0.89,
-      "file_path": "work/projects/lean-graph/2026-01-23-migration.md",
-      "title": "Migration workflow optimization",
-      "excerpt": "...decided to proceed with shadow deployment...",
-      "date": "2026-01-23",
-      "people": ["Sriram", "Suman"],
-      "category": "projects"
-    }
-  ],
-  "total": 42,
-  "query_time_ms": 234
-}
-```
-
-### 5.2 Query (RAG)
-
-```http
-POST /query
-Content-Type: application/json
-Authorization: Bearer {token}
-
-{
-  "question": "What did we decide about the migration timeline?",
-  "vault": "work"
-}
-```
-
-**Response:**
-```json
-{
-  "answer": "Based on the meetings from January 2026, the team decided to...",
-  "sources": [
-    {
-      "file": "work/projects/lean-graph/2026-01-23-migration.md",
-      "excerpt": "..."
-    }
-  ],
-  "confidence": 0.85,
-  "query_time_ms": 2341
-}
-```
-
-### 5.3 Prep (1:1 Context)
-
-```http
-GET /prep/hitesh
-Authorization: Bearer {token}
-```
-
-**Response:**
-```json
-{
-  "person": "Hitesh",
-  "meeting_count": 18,
-  "last_meeting": "2026-01-28",
-  "recent_topics": [
-    "Bedrock benchmarking",
-    "Janus Graph upgrade",
-    "AI agent development"
-  ],
-  "open_actions": [
-    "Complete right-sizing validation",
-    "Create benchmarking issues"
-  ],
-  "recent_meetings": [
-    {
-      "date": "2026-01-28",
-      "title": "Hitesh / Arnab",
-      "summary": "..."
-    }
-  ]
-}
-```
-
----
-
-## 6. Configuration
-
-### 6.1 Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OLLAMA_URL` | Ollama API endpoint | `http://ollama:11434` |
-| `LANCEDB_PATH` | Path to LanceDB data | `/data/lancedb` |
-| `VAULT_WORK_PATH` | Path to work vault | `/data/obsidian/work` |
-| `VAULT_PERSONAL_PATH` | Path to personal vault | `/data/obsidian/personal` |
-| `EXCLUDED_FOLDERS` | Folders to exclude from Claude | `personal/finance` |
-| `CLAWDBOT_URL` | Clawdbot gateway endpoint | `http://host.docker.internal:18789` |
-| `CLAWDBOT_TOKEN` | Clawdbot gateway auth token | Required |
-| `API_TOKEN` | Bearer token for API auth | Required |
-| `LOG_LEVEL` | Logging level | `INFO` |
-| `WATCH_INTERVAL` | File watch debounce (sec) | `30` |
-| `CHUNK_SIZE` | Max tokens per chunk | `500` |
-| `CHUNK_OVERLAP` | Token overlap between chunks | `50` |
-
-### 6.2 settings.yaml
-
-```yaml
-indexing:
-  chunk_size: 500
-  chunk_overlap: 50
-  batch_size: 10
-  # Reindex strategy
-  incremental: true           # Index on file change
-  full_reindex_day: "sunday"  # Weekly full reindex
-  full_reindex_hour: 3        # 3 AM
-  
-search:
-  default_limit: 10
-  max_limit: 50
-  similarity_threshold: 0.7
-
-rag:
-  model: "claude-sonnet-4-20250514"
-  max_context_chunks: 5
-  temperature: 0.3
-  excluded_folders:           # Never send to Claude
-    - "personal/finance"
-
-watcher:
-  enabled: true
-  debounce_seconds: 30
-  patterns:
-    - "*.md"
-
-backup:
-  enabled: true
-  schedule: "0 3 * * *"       # Daily at 3 AM
-  retention_days: 7
-  path: "/home/Arnab/clawd/backups"
-```
-
----
-
-## 7. Deployment
-
-### 7.1 Prerequisites
-
-- Docker & Docker Compose on NAS
-- At least 4GB RAM available
-- Clawdbot gateway running (handles Claude API)
-
-### 7.2 Docker Compose
-
-```yaml
-version: '3.8'
-
-services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: kg-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-
-  api:
-    build: ./api
-    container_name: kg-api
-    ports:
-      - "8080:8080"
-    volumes:
-      - /home/Arnab/clawd/projects/knowledge-graph/obsidian:/data/obsidian
-      - /home/Arnab/clawd/projects/knowledge-graph/lancedb:/data/lancedb
-      - ./config:/app/config
-    environment:
-      - OLLAMA_URL=http://ollama:11434
-      - LANCEDB_PATH=/data/lancedb
-      - VAULT_WORK_PATH=/data/obsidian/work
-      - VAULT_PERSONAL_PATH=/data/obsidian/personal
-      - CLAWDBOT_URL=http://host.docker.internal:18789
-      - CLAWDBOT_TOKEN=${CLAWDBOT_TOKEN}
-      - API_TOKEN=${API_TOKEN}
-      - EXCLUDED_FOLDERS=personal/finance
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - ollama
-    restart: unless-stopped
-
-volumes:
-  ollama_data:
-```
-
-### 7.3 Startup Sequence
-
-1. Start containers: `docker-compose up -d`
-2. Pull embedding model: `docker exec kg-ollama ollama pull nomic-embed-text`
-3. Initialize tables: `curl -X POST http://localhost:8080/index/init`
-4. Run full index: `curl -X POST http://localhost:8080/index/full`
-5. Verify: `curl http://localhost:8080/health`
-
-### 7.4 Backup (Daily Cron)
-
+**Helm Chart:**
 ```bash
-# /etc/cron.d/knowledge-graph-backup
-0 3 * * * root cp -r /home/Arnab/clawd/projects/knowledge-graph/lancedb /home/Arnab/clawd/backups/lancedb_$(date +\%Y\%m\%d)
-# Keep last 7 days
-0 4 * * * root find /home/Arnab/clawd/backups -name "lancedb_*" -mtime +7 -exec rm -rf {} \;
+helm upgrade --install recall ./helm -n apps
 ```
 
----
+### 5.2 External Access
 
-## 8. Monitoring
-
-### 8.1 Health Check
-
-```http
-GET /health
-```
-
-```json
-{
-  "status": "healthy",
-  "components": {
-    "ollama": "ok",
-    "qdrant": "ok",
-    "watcher": "running"
-  },
-  "stats": {
-    "work_vectors": 9847,
-    "personal_vectors": 423,
-    "last_index": "2026-02-01T10:30:00Z"
-  }
-}
-```
-
-### 8.2 Logging
-
-- Structured JSON logs
-- Log levels: DEBUG, INFO, WARNING, ERROR
-- Log rotation: 7 days retained
-
-### 8.3 Alerts (Future)
-
-- Indexing failures
-- Claude API errors
-- Disk space warnings
+Via Cloudflare Tunnel:
+- `recall.domain.com` → UI
+- `recallapi.domain.com` → API (protected)
 
 ---
 
-## 9. Security Considerations
+## 6. Monitoring
 
-| Concern | Mitigation |
-|---------|------------|
-| API access | Bearer token authentication |
-| Data at rest | NAS encryption (if enabled) |
-| Data in transit | HTTPS for Claude API; internal Docker network for services |
-| Sensitive content | Personal vault clearly separated; can exclude from Claude context |
-| API key exposure | Environment variables, not in code |
+### 6.1 Prometheus Metrics
 
----
+| Metric | Type | Description |
+|--------|------|-------------|
+| `recall_search_latency_seconds` | Histogram | Search latency by mode |
+| `recall_search_results_count` | Histogram | Results per search |
+| `recall_rag_query_latency_seconds` | Histogram | RAG latency |
+| `recall_index_progress_percent` | Gauge | Indexing progress |
 
-## 10. Future Enhancements
+### 6.2 Grafana Dashboard
 
-| Enhancement | Complexity | Value |
-|-------------|------------|-------|
-| Web UI | Medium | High |
-| Calendar integration | Medium | High |
-| Slack bot | Low | Medium |
-| Local LLM option | Low | Medium |
-| Mobile app | High | Medium |
-| Multi-user | High | Low |
+Pre-built dashboard with:
+- Search latency percentiles
+- Query throughput
+- Indexing progress
+- Error rates
 
 ---
 
-## 11. Decision Log
+## 7. GPU Offload
 
-| Decision | Rationale | Date |
-|----------|-----------|------|
-| Use Ollama on NAS (CPU) | Always available, no wake-on-LAN complexity | 2026-02-01 |
-| Use Claude for answers | Higher quality than local LLM, already available via Clawdbot | 2026-02-01 |
-| **Route LLM via Clawdbot gateway** | Single API key, centralized logging, model flexibility — no separate Anthropic key needed | 2026-02-01 |
-| Docker Compose deployment | Isolation, easy updates, consistent environment | 2026-02-01 |
-| nomic-embed-text model | Good quality, fast on CPU, large context window | 2026-02-01 |
-| **LanceDB for vectors** | Embedded (no server), file-based (easy backup), simpler architecture | 2026-02-01 |
-| Incremental + weekly full reindex | Balance freshness with consistency, avoid daily full reindex overhead | 2026-02-01 |
-| Exclude finance/ from Claude | Privacy for sensitive financial data | 2026-02-01 |
-| Daily local backup | Simple cp of LanceDB folder, 7-day retention | 2026-02-01 |
+For faster indexing, supports GPU offload:
+
+1. Wake GPU machine via Wake-on-LAN
+2. API calls GPU machine's Ollama for embeddings
+3. Shutdown GPU machine when done
+
+**Performance:**
+- CPU: ~20 hours for full reindex
+- GPU: ~5 minutes for full reindex
 
 ---
 
-*Document Version History:*
-- v1.0 (2026-02-01): Initial architecture
+## 8. Backup
+
+### 8.1 Data to Backup
+- `/data/lancedb/` - Vector database
+- `/data/obsidian/` - Source documents
+- FTS database (if persistent)
+
+### 8.2 Strategy
+- Daily incremental backup of lancedb
+- Weekly full backup
+- Source documents synced from primary (Mac/Granola)
+
+---
+
+*Last updated: 2026-02-14*

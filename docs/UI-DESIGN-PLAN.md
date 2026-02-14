@@ -24,7 +24,7 @@ A minimal, Obsidian-inspired knowledge search and viewing interface. Clean, fast
 
 ### 3. Core Interactions
 - **Cmd+K / Ctrl+K**: Global search (always accessible)
-- **Natural language**: "What did I discuss with Sameer last week?"
+- **Natural language**: "What did I discuss with Alex last week?"
 - **Instant results**: Search-as-you-type with debouncing
 - **Quick preview**: Hover/click to see full note without navigation
 
@@ -43,8 +43,8 @@ A minimal, Obsidian-inspired knowledge search and viewing interface. Clean, fast
 │   └─────────────────────────────────────────┘   │
 │                                                 │
 │   Recent searches:                              │
-│   • Sameer 1:1 action items                     │
-│   • Project Bedrock timeline                    │
+│   • 1:1 action items                            │
+│   • Project Alpha timeline                      │
 │   • Q4 planning notes                           │
 │                                                 │
 │   Quick filters: [Work] [Personal] [PDFs]       │
@@ -55,27 +55,27 @@ A minimal, Obsidian-inspired knowledge search and viewing interface. Clean, fast
 ### 2. Search Results
 ```
 ┌─────────────────────────────────────────────────┐
-│  🔍 "sameer action items"              [Clear] │
+│  🔍 "action items"                     [Clear] │
 ├─────────────────────────────────────────────────┤
 │                                                 │
 │  💬 AI Answer:                                  │
 │  ┌─────────────────────────────────────────┐   │
-│  │ Based on your notes, Sameer's main      │   │
-│  │ action items are:                        │   │
+│  │ Based on your notes, the main action    │   │
+│  │ items are:                               │   │
 │  │ 1. Finalize Q1 roadmap by Feb 15        │   │
-│  │ 2. Review Metastore migration plan      │   │
+│  │ 2. Review migration plan                 │   │
 │  │ Sources: [2026-01-28], [2026-01-13]     │   │
 │  └─────────────────────────────────────────┘   │
 │                                                 │
 │  📄 Related Notes (5):                          │
 │  ┌─────────────────────────────────────────┐   │
-│  │ 📝 2026-01-28-sameer-arnab             │   │
-│  │ work/people/sameer • 85% match          │   │
+│  │ 📝 2026-01-28-weekly-sync              │   │
+│  │ work/meetings • 85% match               │   │
 │  │ "...discussed roadmap priorities..."    │   │
 │  └─────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────┐   │
-│  │ 📝 2026-01-13-sameer-arnab             │   │
-│  │ work/people/sameer • 78% match          │   │
+│  │ 📝 2026-01-13-team-standup             │   │
+│  │ work/meetings • 78% match               │   │
 │  └─────────────────────────────────────────┘   │
 │                                                 │
 └─────────────────────────────────────────────────┘
@@ -84,22 +84,22 @@ A minimal, Obsidian-inspired knowledge search and viewing interface. Clean, fast
 ### 3. Note Viewer
 ```
 ┌─────────────────────────────────────────────────┐
-│  ← Back    2026-01-28-sameer-arnab    [Edit]   │
+│  ← Back    2026-01-28-weekly-sync      [Edit]  │
 ├─────────────────────────────────────────────────┤
 │                                                 │
-│  # 1:1 with Sameer - Jan 28, 2026              │
+│  # Weekly Sync - Jan 28, 2026                  │
 │                                                 │
 │  ## Action Items                                │
 │  - [ ] Finalize Q1 roadmap by Feb 15           │
-│  - [x] Review Metastore migration plan         │
+│  - [x] Review migration plan                    │
 │                                                 │
 │  ## Discussion Notes                            │
 │  Talked about the upcoming reorg and how       │
-│  it affects the Platform team...               │
+│  it affects the team...                         │
 │                                                 │
 │  ---                                            │
-│  Tags: #sameer #1-1 #planning                  │
-│  Modified: Feb 1, 2026                         │
+│  Tags: #meeting #planning                       │
+│  Modified: Feb 1, 2026                          │
 │                                                 │
 └─────────────────────────────────────────────────┘
 ```
@@ -107,15 +107,15 @@ A minimal, Obsidian-inspired knowledge search and viewing interface. Clean, fast
 ### 4. Note Editor (Simple)
 ```
 ┌─────────────────────────────────────────────────┐
-│  ← Cancel   Editing: sameer-arnab    [Save ⌘S] │
+│  ← Cancel   Editing: weekly-sync       [Save]  │
 ├─────────────────────────────────────────────────┤
 │                                                 │
 │  ┌─────────────────────────────────────────┐   │
-│  │ # 1:1 with Sameer - Jan 28, 2026       │   │
+│  │ # Weekly Sync - Jan 28, 2026           │   │
 │  │                                         │   │
 │  │ ## Action Items                         │   │
 │  │ - [ ] Finalize Q1 roadmap by Feb 15    │   │
-│  │ - [x] Review Metastore migration plan  │   │
+│  │ - [x] Review migration plan            │   │
 │  │ |                                       │   │
 │  └─────────────────────────────────────────┘   │
 │                                                 │
@@ -124,7 +124,7 @@ A minimal, Obsidian-inspired knowledge search and viewing interface. Clean, fast
 └─────────────────────────────────────────────────┘
 ```
 
-### 5. Browse (Optional - File Tree)
+### 5. Browse (File Tree)
 ```
 ┌─────────────────────────────────────────────────┐
 │  🧠 Recall    [Search] [Browse]                │
@@ -132,12 +132,12 @@ A minimal, Obsidian-inspired knowledge search and viewing interface. Clean, fast
 │                                                 │
 │  📁 work                                        │
 │    📁 people                                    │
-│      📁 sameer (12 notes)                      │
-│      📁 suchit (8 notes)                       │
-│      📁 rohit (5 notes)                        │
+│      📁 alex (12 notes)                        │
+│      📁 jordan (8 notes)                       │
+│      📁 taylor (5 notes)                       │
 │    📁 projects                                  │
-│      📁 metastore                              │
-│      📁 bedrock                                │
+│      📁 project-alpha                          │
+│      📁 project-beta                           │
 │    📁 meetings                                  │
 │                                                 │
 │  📁 personal                                    │
@@ -174,12 +174,12 @@ A minimal, Obsidian-inspired knowledge search and viewing interface. Clean, fast
 
 ### Build & Deploy
 - **Docker**: Multi-stage build (node → nginx)
-- **k8s**: Same pattern as Launchpad/Vault
-- **Cloudflare**: `recall.arnabsaha.com`
+- **k8s**: Same pattern as other internal apps
+- **Reverse proxy**: Via ingress or tunnel
 
 ---
 
-## API Additions Needed
+## API Endpoints Needed
 
 Current API supports search/query but needs:
 
@@ -187,13 +187,13 @@ Current API supports search/query but needs:
 Retrieve full note content by path.
 ```json
 {
-  "path": "work/people/sameer/2026-01-28.md",
-  "title": "1:1 with Sameer",
+  "path": "work/meetings/2026-01-28.md",
+  "title": "Weekly Sync",
   "content": "# Full markdown content...",
   "metadata": {
     "vault": "work",
     "modified": "2026-01-28T10:30:00Z",
-    "tags": ["sameer", "1-1"]
+    "tags": ["meeting", "planning"]
   }
 }
 ```
@@ -212,8 +212,8 @@ Return file tree structure for browsing.
 {
   "work": {
     "people": {
-      "sameer": ["2026-01-28.md", "2026-01-13.md"],
-      "suchit": ["2025-06-18.md"]
+      "alex": ["2026-01-28.md", "2026-01-13.md"],
+      "jordan": ["2025-06-18.md"]
     }
   },
   "personal": { ... }
@@ -293,12 +293,12 @@ xl: 1280px  /* Desktops */
 ## MVP Scope (Phase 1)
 
 ### Must Have
-- [ ] Search page with natural language input
-- [ ] AI-generated answer display
-- [ ] Search results list with scores
-- [ ] Note viewer (markdown rendered)
-- [ ] Dark mode (default)
-- [ ] Mobile responsive
+- [x] Search page with natural language input
+- [x] AI-generated answer display
+- [x] Search results list with scores
+- [x] Note viewer (markdown rendered)
+- [x] Dark mode (default)
+- [x] Mobile responsive
 - [ ] Keyboard shortcuts (Cmd+K)
 
 ### Nice to Have (Phase 2)
@@ -364,29 +364,20 @@ recall-ui/
 
 ---
 
-## Skills/Setup Needed
+## Recent Updates
 
-### Already Have
-- ✅ React/Vite experience (from Launchpad/Vault)
-- ✅ TailwindCSS configured
-- ✅ Docker + k8s deployment
-- ✅ API backend ready
+### v1.1 - Temporal Search (2026-02-14)
+Added date-aware filtering to search:
+- "this week", "last month", "yesterday" auto-filter results
+- Date range parameters in API (`date_from`, `date_to`)
+- Cleaned query after temporal expression extraction
 
-### May Need
-- 🔧 Add note retrieval endpoints to API
-- 🔧 CORS configuration for UI origin
-- 🔧 Decide on markdown editor library
-
----
-
-## Next Steps
-
-1. **Add API endpoints** for note retrieval/editing
-2. **Scaffold React project** with Vite + Tailwind
-3. **Build search page** first (core feature)
-4. **Deploy to k8s** alongside API
-5. **Iterate based on usage**
+### v1.0 - MVP (2026-02-13)
+- Search page with AI answers
+- Note viewer with markdown rendering
+- Browse page with folder navigation
+- Dark mode, mobile responsive
 
 ---
 
-*Created: 2026-02-13*
+*Last updated: 2026-02-14*

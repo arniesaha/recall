@@ -4,6 +4,7 @@ Handles semantic search, hybrid search, and RAG queries
 
 v2: Added BM25 + Vector hybrid search with RRF fusion and reranking
 v3: Added name-aware hybrid boost for better person search
+v4: Added temporal expression parsing for date-aware search
 """
 
 import os
@@ -19,6 +20,7 @@ from config import Settings
 from fusion import reciprocal_rank_fusion, position_aware_blend, normalize_scores
 from fts_index import FTSIndex
 from reranker import Reranker
+from temporal import parse_temporal_expression, extract_query_without_temporal, DateRange
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +154,9 @@ class Searcher:
         vault: str = "all",
         category: Optional[str] = None,
         person: Optional[str] = None,
-        limit: int = 30
+        limit: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
     ) -> List[Dict]:
         """Pure vector search using LanceDB."""
         
@@ -177,6 +181,10 @@ class Searcher:
                     filters.append(f'category = "{category}"')
                 if person:
                     filters.append(f'array_contains(people, "{person}")')
+                if date_from:
+                    filters.append(f'date >= "{date_from}"')
+                if date_to:
+                    filters.append(f'date <= "{date_to}"')
                 
                 if filters:
                     search = search.where(" AND ".join(filters))
@@ -215,7 +223,9 @@ class Searcher:
         query: str,
         vault: str = "all",
         person: Optional[str] = None,
-        limit: int = 30
+        limit: int = 30,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
     ) -> List[Dict]:
         """BM25 keyword search using SQLite FTS5."""
         if self.fts_index is None:
@@ -225,7 +235,9 @@ class Searcher:
             query=query,
             vault=vault,
             limit=limit,
-            person=person
+            person=person,
+            date_from=date_from,
+            date_to=date_to
         )
     
     async def hybrid_search(
@@ -234,7 +246,9 @@ class Searcher:
         vault: str = "all",
         category: Optional[str] = None,
         person: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
     ) -> List[Dict]:
         """
         Hybrid search combining BM25 + Vector using RRF fusion.
@@ -244,12 +258,27 @@ class Searcher:
         Name-aware boost: When query contains person names, BM25 is weighted
         higher (3:1 ratio) because embedding models don't handle proper nouns well.
         Also uses name-only search for BM25 to avoid FTS phrase matching issues.
+        
+        Temporal awareness: If query contains temporal expressions like "this week"
+        or "last month", automatically filters results to that date range.
         """
         import asyncio
         
+        # Parse temporal expressions from query
+        date_range = parse_temporal_expression(query)
+        if date_range:
+            # Use parsed date range
+            date_from = date_range.start
+            date_to = date_range.end
+            # Clean query to remove temporal expression for better semantic search
+            search_query = extract_query_without_temporal(query, date_range)
+            logger.info(f"Temporal query detected: {date_range}, cleaned query: '{search_query}'")
+        else:
+            search_query = query
+        
         # Detect if this is a person-focused query
-        detected_names = detect_names(query)
-        is_person_query = has_person_query_intent(query) or len(detected_names) > 0
+        detected_names = detect_names(search_query)
+        is_person_query = has_person_query_intent(search_query) or len(detected_names) > 0
         
         # For person queries, use just the name(s) for BM25 to avoid phrase matching issues
         # e.g., "one-on-one with Nikhil" -> BM25 searches for "Nikhil"
@@ -257,11 +286,11 @@ class Searcher:
             bm25_query = " ".join(detected_names)
             logger.info(f"Person query detected. Names: {detected_names}, BM25 query: '{bm25_query}'")
         else:
-            bm25_query = query
+            bm25_query = search_query
         
         # Run BM25 and vector search in parallel
-        bm25_task = self.bm25_search(bm25_query, vault, person, limit=30)
-        vector_task = self.vector_search(query, vault, category, person, limit=30)
+        bm25_task = self.bm25_search(bm25_query, vault, person, limit=30, date_from=date_from, date_to=date_to)
+        vector_task = self.vector_search(search_query, vault, category, person, limit=30, date_from=date_from, date_to=date_to)
         
         bm25_results, vector_results = await asyncio.gather(bm25_task, vector_task)
         
@@ -345,7 +374,9 @@ class Searcher:
         category: Optional[str] = None,
         person: Optional[str] = None,
         limit: int = 10,
-        mode: str = "hybrid"
+        mode: str = "hybrid",
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
     ) -> List[Dict]:
         """
         Unified search interface.
@@ -355,15 +386,18 @@ class Searcher:
         - "bm25": Pure BM25 search (fast, keyword)
         - "hybrid": BM25 + Vector with RRF (recommended)
         - "query": Full pipeline with expansion + reranking (best quality)
+        
+        Temporal: If date_from/date_to are not provided, they are auto-parsed
+        from temporal expressions in the query (e.g., "this week", "last month").
         """
         if mode == "vector":
-            results = await self.vector_search(query, vault, category, person, limit)
+            results = await self.vector_search(query, vault, category, person, limit, date_from, date_to)
         elif mode == "bm25":
-            results = await self.bm25_search(query, vault, person, limit)
+            results = await self.bm25_search(query, vault, person, limit, date_from, date_to)
         elif mode == "query":
             results = await self.query_search(query, vault, category, person, limit)
         else:  # hybrid (default)
-            results = await self.hybrid_search(query, vault, category, person, limit)
+            results = await self.hybrid_search(query, vault, category, person, limit, date_from, date_to)
         
         # Format results for API response
         formatted = []
