@@ -2,9 +2,9 @@
 
 ## Overview
 
-The indexing system supports both full reindex and incremental indexing. The **n8n workflow does not need to change** — it continues to call `/index/start`, and the backend determines whether to do a full or incremental index based on the `full` parameter.
+The indexing system supports both full reindex and incremental indexing. Callers use `/index/start`, and the backend determines whether to do a full or incremental index based on the `full` parameter.
 
-## API Contract (Unchanged)
+## API Contract
 
 ```
 POST /index/start
@@ -18,7 +18,7 @@ POST /index/start
 - `full: true` → Full reindex (clears table, re-indexes everything)
 - `full: false` → Incremental (only new/modified/deleted files)
 
-The n8n workflow should use `full: false` for regular scheduled syncs.
+Use `full: false` for regular scheduled syncs.
 
 ## Incremental Logic (Backend)
 
@@ -51,15 +51,13 @@ The n8n workflow should use `full: false` for regular scheduled syncs.
 
 ### Deletion Handling
 
-Current implementation doesn't handle deletions. Enhancement:
-
 1. Build set of all files currently on disk
 2. Query index for all indexed file paths
 3. Find files in index but not on disk → delete from index
 
-## Schema Changes
+## Schema
 
-Add `mtime` field to `DocumentChunk`:
+The `DocumentChunk` includes `mtime` for change detection:
 
 ```python
 class DocumentChunk(LanceModel):
@@ -67,28 +65,26 @@ class DocumentChunk(LanceModel):
     vector: Vector(768)
     file_path: str
     file_hash: str
-    mtime: float              # NEW: file modification time (Unix timestamp)
+    mtime: float              # file modification time (Unix timestamp)
     title: str
     # ... rest unchanged
 ```
 
 ## Performance
 
-| Files | Current (read all) | Optimized (mtime check) |
-|-------|-------------------|-------------------------|
+| Files | Full (read all) | Incremental (mtime check) |
+|-------|-----------------|---------------------------|
 | 3,000 | ~45 sec | ~2-3 sec (if few changes) |
 | 10,000 | ~150 sec | ~5-8 sec (if few changes) |
 
 The mtime check is a simple `os.stat()` call (~0.1ms per file), vs reading file content (~5-50ms per file depending on size).
 
-## n8n Workflow
+## Automation
 
-No changes required. The workflow continues to:
-
-1. Trigger on schedule (e.g., every 6h) or webhook
-2. Call `POST /index/start` with `full: false`
-3. Receive callback on completion
-4. (Optional) Send notification on failure
+Trigger indexing via:
+- Cron job calling the API
+- OpenClaw scheduled task
+- Manual API call
 
 ## Migration
 
@@ -101,4 +97,4 @@ Alternative: Run one `full: true` reindex after deployment to populate all mtime
 
 ---
 
-*Last updated: 2026-02-11*
+*Last updated: 2026-02-15*
