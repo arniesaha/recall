@@ -43,7 +43,7 @@ export default function SearchResults({
   )]
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 w-full overflow-hidden">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-text-secondary">
           <FileSearch className="w-5 h-5" />

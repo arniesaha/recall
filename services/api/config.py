@@ -44,10 +44,20 @@ class Settings(BaseSettings):
     # Indexing
     chunk_size: int = 500
     chunk_overlap: int = 50
+    transcript_chunk_multiplier: float = 2.5  # Larger chunks for transcripts (2.5x = ~5000 chars)
+    
+    # Noise filtering for transcripts
+    filter_transcript_noise: bool = True
+    transcript_noise_phrases: str = "Yeah.|Yep.|Mhmm.|Mm-hmm.|Uh-huh.|Right.|Correct.|Okay.|OK.|Sure.|Got it.|I see.|Exactly.|Absolutely.|Definitely.|Perfect.|Great.|Nice.|Cool.|Alright.|All right.|Um.|Uh.|Like,|You know,|I mean,|So,|Well,|Actually,|Basically,|Obviously,|Honestly,|Literally,"
     
     # Search
     default_search_limit: int = 10
     similarity_threshold: float = 0.7
+    
+    # Source boosting (daily-notes/summaries over transcripts)
+    boost_daily_notes: bool = True
+    daily_notes_boost: float = 1.15  # 15% boost for daily-notes (summaries)
+    transcript_penalty: float = 0.90  # 10% penalty for raw transcripts
     
     # RAG
     max_context_chunks: int = 5

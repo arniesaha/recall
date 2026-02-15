@@ -91,15 +91,13 @@ def parse_temporal_expression(query: str, reference_date: Optional[datetime] = N
             'this week'
         )
     
-    # Last week
+    # Last week - treat as "past 7 days" for more intuitive results
+    # (users typically mean "recently" not "the previous calendar week")
     if re.search(r'\blast week\b', query_lower):
-        days_since_monday = reference_date.weekday()
-        this_monday = reference_date - timedelta(days=days_since_monday)
-        last_monday = this_monday - timedelta(days=7)
-        last_sunday = this_monday - timedelta(days=1)
+        start = reference_date - timedelta(days=7)
         return DateRange(
-            last_monday.strftime('%Y-%m-%d'),
-            last_sunday.strftime('%Y-%m-%d'),
+            start.strftime('%Y-%m-%d'),
+            reference_date.strftime('%Y-%m-%d'),
             'last week'
         )
     

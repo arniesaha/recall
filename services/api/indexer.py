@@ -172,9 +172,56 @@ class Indexer:
         
         return results
     
+    def _is_transcript(self, file_path: str) -> bool:
+        """Check if file is a transcript (longer chunks, noise filtering)."""
+        return "-transcript" in file_path.lower() or "/transcripts/" in file_path.lower()
+    
+    def _filter_transcript_noise(self, content: str) -> str:
+        """Remove filler phrases from transcript content to improve embedding quality."""
+        if not self.settings.filter_transcript_noise:
+            return content
+        
+        # Get noise phrases from config
+        noise_phrases = [p.strip() for p in self.settings.transcript_noise_phrases.split("|")]
+        
+        # Process line by line to remove noise-only lines
+        lines = content.split("\n")
+        filtered_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            # Skip lines that are just noise phrases
+            if stripped in noise_phrases:
+                continue
+            # Skip very short lines that are likely just filler (< 15 chars after stripping)
+            if len(stripped) < 15 and any(stripped.startswith(p.rstrip(",")) for p in noise_phrases):
+                continue
+            filtered_lines.append(line)
+        
+        # Also remove inline noise at start of sentences
+        result = "\n".join(filtered_lines)
+        for phrase in noise_phrases:
+            if phrase.endswith(","):
+                # For phrases like "Like," "You know," — remove when at sentence start
+                result = re.sub(rf'(?<=[.!?]\s){re.escape(phrase)}\s*', '', result, flags=re.IGNORECASE)
+        
+        return result
+    
     def _chunk_document_sync(self, content: str, metadata: dict) -> List[Dict]:
         """Split document into chunks with overlap. (CPU-bound, runs in thread pool)"""
         chunks = []
+        
+        file_path = metadata.get("file_path", "")
+        is_transcript = self._is_transcript(file_path)
+        
+        # Use larger chunks for transcripts
+        chunk_multiplier = self.settings.transcript_chunk_multiplier if is_transcript else 1.0
+        effective_chunk_size = int(self.settings.chunk_size * 4 * chunk_multiplier)
+        effective_overlap = int(self.settings.chunk_overlap * 4 * chunk_multiplier)
+        
+        # Filter noise from transcripts
+        if is_transcript:
+            content = self._filter_transcript_noise(content)
         
         # Simple chunking by paragraphs/sections
         # Split on double newlines or headers
@@ -189,7 +236,7 @@ class Indexer:
                 continue
             
             # If adding this section exceeds chunk size, save current and start new
-            if len(current_chunk) + len(section) > self.settings.chunk_size * 4:  # Approx chars
+            if len(current_chunk) + len(section) > effective_chunk_size:
                 if current_chunk:
                     chunks.append({
                         "chunk_index": chunk_index,
@@ -198,7 +245,7 @@ class Indexer:
                     })
                     chunk_index += 1
                     # Keep overlap
-                    overlap_start = max(0, len(current_chunk) - self.settings.chunk_overlap * 4)
+                    overlap_start = max(0, len(current_chunk) - effective_overlap)
                     current_chunk = current_chunk[overlap_start:] + "\n\n" + section
                 else:
                     current_chunk = section

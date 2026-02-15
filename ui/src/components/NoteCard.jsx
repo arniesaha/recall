@@ -27,15 +27,15 @@ export default function NoteCard({ result, onClick, isExpanded = false }) {
         bg-bg-secondary border border-border rounded-xl p-4
         hover:border-accent/30 hover:bg-bg-secondary/80
         cursor-pointer transition-all duration-150
-        animate-fade-in
+        animate-fade-in overflow-hidden w-full
         ${isExpanded ? 'ring-2 ring-accent' : ''}
       `}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
           <FileText className="w-4 h-4 text-accent flex-shrink-0" />
-          <h3 className="font-medium truncate">{displayTitle}</h3>
+          <h3 className="font-medium truncate max-w-full">{displayTitle}</h3>
         </div>
         <span className={`
           px-2 py-0.5 rounded text-xs font-medium flex-shrink-0

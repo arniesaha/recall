@@ -3,10 +3,15 @@
 Daily Vault Sync - Reorganize + GPU Reindex
 
 This script:
-1. Runs reorganize_v2.py to process new Granola notes
-2. Wakes up GPU PC via WoL
-3. Triggers GPU-accelerated reindex via Recall API
-4. Shuts down GPU PC when complete
+1. Checks for new/modified files (skip if none, unless --force)
+2. Runs reorganize_v2.py to process new Granola notes (optional)
+3. Wakes up GPU PC via WoL
+4. Triggers GPU-accelerated reindex via Recall API
+5. Shuts down GPU PC when complete
+
+Usage:
+    python daily_vault_sync.py           # Normal run (skip if no new files)
+    python daily_vault_sync.py --force   # Force full reindex regardless of changes
 
 Designed to be run daily via cron or OpenClaw scheduled task.
 """
@@ -15,6 +20,7 @@ import os
 import sys
 import time
 import logging
+import argparse
 import requests
 from pathlib import Path
 from datetime import datetime
@@ -55,6 +61,63 @@ SHUTDOWN_TOKEN = os.environ.get("SHUTDOWN_TOKEN", "gpu-shutdown-ok")
 GPU_WAKE_TIMEOUT = 180  # 3 minutes to wake
 GPU_INDEX_TIMEOUT = 1800  # 30 minutes max for indexing
 POLL_INTERVAL = 30  # Check progress every 30s
+
+# Vault paths (for pre-check)
+OBSIDIAN_WORK_PATH = Path(os.environ.get("OBSIDIAN_WORK_PATH", "/home/Arnab/clawd/projects/recall/obsidian/work"))
+LAST_INDEX_FILE = SCRIPT_DIR.parent / "logs" / ".last_index_time"
+
+
+def check_for_new_files():
+    """
+    Check if there are new/modified files since last index.
+    Returns (has_new_files, new_count, total_count).
+    """
+    logger.info("🔍 Checking for new/modified files...")
+    
+    # Get last index time
+    last_index_time = 0
+    if LAST_INDEX_FILE.exists():
+        try:
+            last_index_time = float(LAST_INDEX_FILE.read_text().strip())
+            logger.info(f"Last index: {datetime.fromtimestamp(last_index_time).strftime('%Y-%m-%d %H:%M')}")
+        except:
+            pass
+    
+    # Scan vault for .md files
+    new_files = []
+    total_files = 0
+    
+    for md_file in OBSIDIAN_WORK_PATH.rglob("*.md"):
+        total_files += 1
+        try:
+            mtime = md_file.stat().st_mtime
+            if mtime > last_index_time:
+                new_files.append(md_file)
+        except:
+            pass
+    
+    new_count = len(new_files)
+    
+    if new_count > 0:
+        logger.info(f"📄 Found {new_count} new/modified files (out of {total_files} total)")
+        # Log first few new files
+        for f in new_files[:5]:
+            logger.info(f"  - {f.name}")
+        if new_count > 5:
+            logger.info(f"  ... and {new_count - 5} more")
+    else:
+        logger.info(f"✅ No new files since last index ({total_files} files unchanged)")
+    
+    return new_count > 0, new_count, total_files
+
+
+def save_index_timestamp():
+    """Save current timestamp as last index time."""
+    try:
+        LAST_INDEX_FILE.write_text(str(time.time()))
+        logger.info("📝 Saved index timestamp")
+    except Exception as e:
+        logger.warning(f"Could not save index timestamp: {e}")
 
 
 def run_reorganize():
@@ -157,11 +220,12 @@ def trigger_gpu_reindex():
 
 
 def wait_for_index_complete():
-    """Poll index progress until complete."""
+    """Poll index progress until complete. Returns (success, files_processed)."""
     logger.info("📊 Monitoring index progress...")
     
     headers = {"Authorization": f"Bearer {RECALL_API_TOKEN}"}
     start = time.time()
+    last_processed = 0
     
     while time.time() - start < GPU_INDEX_TIMEOUT:
         try:
@@ -173,15 +237,32 @@ def wait_for_index_complete():
             
             if resp.status_code == 200:
                 data = resp.json()
+                status = data.get("status", "unknown")
+                processed = data.get("processed", 0)
+                total = data.get("total", 0)
                 
-                if not data.get("running", False):
-                    logger.info(f"✅ Indexing complete! Processed {data.get('processed', '?')} files")
-                    return True
+                # Check if job completed (status is "idle" or "completed", not "running")
+                if status != "running":
+                    if processed > 0:
+                        logger.info(f"✅ Indexing complete! Processed {processed} files")
+                        return True, processed
+                    elif total == 0 and processed == 0:
+                        # Job started but found no files - this is an error
+                        logger.error(f"❌ Indexing completed but 0 files processed! Check vault path.")
+                        return False, 0
+                    else:
+                        logger.info(f"✅ Indexing complete! Processed {processed} files")
+                        return True, processed
                 
+                # Still running - log progress
                 percent = data.get("percent", 0)
                 eta = data.get("eta_human", "unknown")
                 current = data.get("current_file", "")[:50]
-                logger.info(f"Progress: {percent:.1f}% | ETA: {eta} | {current}")
+                
+                # Only log if progress changed
+                if processed != last_processed:
+                    logger.info(f"Progress: {percent:.1f}% ({processed}/{total}) | ETA: {eta} | {current}")
+                    last_processed = processed
             
         except requests.exceptions.RequestException as e:
             logger.warning(f"Progress check failed: {e}")
@@ -189,7 +270,7 @@ def wait_for_index_complete():
         time.sleep(POLL_INTERVAL)
     
     logger.error(f"❌ Indexing timed out after {GPU_INDEX_TIMEOUT}s")
-    return False
+    return False, last_processed
 
 
 def shutdown_gpu_pc():
@@ -215,8 +296,18 @@ def shutdown_gpu_pc():
 
 
 def main():
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Daily Vault Sync - GPU-accelerated reindexing")
+    parser.add_argument("--force", "-f", action="store_true", 
+                        help="Force full reindex regardless of file changes")
+    parser.add_argument("--skip-shutdown", action="store_true",
+                        help="Don't shutdown GPU PC after indexing")
+    args = parser.parse_args()
+    
     logger.info("=" * 60)
     logger.info(f"🗓️  Daily Vault Sync - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    if args.force:
+        logger.info("⚡ FORCE MODE - will reindex all files")
     logger.info("=" * 60)
     
     # Step 1: Reorganize vault (optional - skipped by default for flat structure)
@@ -226,34 +317,60 @@ def main():
         logger.error("Reorganization failed, aborting")
         return 1
     
-    # Step 2: Wake GPU PC
+    # Step 2: Check if there are new files to index (skip check if --force)
+    if args.force:
+        logger.info("🔄 Force mode: skipping new file check, will reindex everything")
+        new_count = "all"
+    else:
+        has_new_files, new_count, total_count = check_for_new_files()
+        
+        if not has_new_files:
+            logger.info("🎉 No new files to index - skipping GPU wake and reindex")
+            logger.info("Daily vault sync completed (nothing to do)")
+            return 0
+        
+        logger.info(f"📊 {new_count} files need indexing - proceeding with GPU reindex")
+    
+    # Step 3: Wake GPU PC
     if not wake_gpu_pc():
         logger.error("Failed to send WoL, aborting GPU reindex")
         return 1
     
-    # Step 3: Wait for Ollama
+    # Step 4: Wait for Ollama
     if not wait_for_gpu_ollama():
         logger.error("GPU Ollama not available, aborting")
         return 1
     
-    # Step 4: Trigger reindex
+    # Step 5: Trigger reindex
     if not trigger_gpu_reindex():
         logger.error("Failed to trigger reindex")
-        shutdown_gpu_pc()  # Still try to shutdown
+        if not args.skip_shutdown:
+            shutdown_gpu_pc()  # Still try to shutdown
         return 1
     
-    # Step 5: Wait for completion
-    success = wait_for_index_complete()
+    # Step 6: Wait for completion
+    success, files_processed = wait_for_index_complete()
     
-    # Step 6: Shutdown GPU PC
-    shutdown_gpu_pc()
-    
-    if success:
-        logger.info("🎉 Daily vault sync completed successfully!")
-        return 0
+    # Step 7: Shutdown GPU PC (unless --skip-shutdown)
+    if args.skip_shutdown:
+        logger.info("⏭️  Skipping GPU shutdown (--skip-shutdown flag)")
     else:
-        logger.error("Daily vault sync completed with errors")
+        shutdown_gpu_pc()
+    
+    # Validate results
+    if not success:
+        logger.error("❌ Daily vault sync FAILED - indexing did not complete successfully")
         return 1
+    
+    if files_processed == 0:
+        logger.error("❌ Daily vault sync FAILED - 0 files were indexed (check vault path!)")
+        return 1
+    
+    # Save timestamp for next run's comparison
+    save_index_timestamp()
+    
+    logger.info(f"🎉 Daily vault sync completed successfully! Indexed {files_processed} files")
+    return 0
 
 
 if __name__ == "__main__":

@@ -63,6 +63,7 @@ def detect_names(query: str) -> Set[str]:
     - Capitalized words that aren't at sentence start
     - Words that aren't common English words
     - Excludes known tech acronyms
+    - First word is ALWAYS skipped (sentence capitalization)
     
     Returns:
         Set of detected name tokens
@@ -76,14 +77,15 @@ def detect_names(query: str) -> Set[str]:
         if not clean:
             continue
         
+        # ALWAYS skip first word - it's capitalized due to sentence start
+        if i == 0:
+            continue
+        
         # Check if capitalized (but not all caps like "API")
         if clean[0].isupper() and not clean.isupper():
             # Skip if it's a common word
             if clean.lower() not in COMMON_WORDS:
-                # Skip if first word (might just be sentence start)
-                # Unless it looks like a name (short, no numbers)
-                if i > 0 or (len(clean) <= 15 and not any(c.isdigit() for c in clean)):
-                    names.add(clean)
+                names.add(clean)
     
     return names
 
@@ -321,7 +323,44 @@ class Searcher:
         # Normalize scores to 0-1
         fused = normalize_scores(fused)
         
+        # Apply source boosting (daily-notes > transcripts)
+        if self.settings.boost_daily_notes:
+            fused = self._apply_source_boost(fused)
+        
         return fused[:limit]
+    
+    def _apply_source_boost(self, results: List[Dict]) -> List[Dict]:
+        """
+        Apply score adjustments based on document source.
+        
+        Rationale: daily-notes (Granola summaries) contain distilled insights
+        and rank better than raw transcripts which are noisy and verbose.
+        """
+        boosted_count = 0
+        penalized_count = 0
+        
+        for r in results:
+            file_path = r.get("file_path", "").lower()
+            score = r.get("score", 0)
+            
+            # Boost daily-notes (summaries)
+            if "/daily-notes/" in file_path and "-transcript" not in file_path:
+                r["score"] = score * self.settings.daily_notes_boost
+                r["_boost_applied"] = "daily-notes"
+                boosted_count += 1
+            
+            # Slight penalty for raw transcripts
+            elif "-transcript" in file_path or "/transcripts/" in file_path:
+                r["score"] = score * self.settings.transcript_penalty
+                r["_boost_applied"] = "transcript-penalty"
+                penalized_count += 1
+        
+        if boosted_count > 0 or penalized_count > 0:
+            logger.info(f"Source boost applied: {boosted_count} daily-notes boosted, {penalized_count} transcripts penalized")
+        
+        # Re-sort after boost
+        results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return results
     
     async def query_search(
         self,

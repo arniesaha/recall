@@ -180,6 +180,15 @@ async def lifespan(app: FastAPI):
     # Initialize tables if needed
     await indexer.init_tables()
     
+    # Initialize health metrics with default values
+    COMPONENT_UP.labels(component="ollama").set(0)
+    COMPONENT_UP.labels(component="lancedb").set(0)
+    COMPONENT_UP.labels(component="fts").set(0)
+    INDEX_DOCUMENTS.labels(vault="work", index_type="vector").set(0)
+    INDEX_DOCUMENTS.labels(vault="personal", index_type="vector").set(0)
+    INDEX_DOCUMENTS.labels(vault="work", index_type="fts").set(0)
+    INDEX_DOCUMENTS.labels(vault="personal", index_type="fts").set(0)
+    
     logger.info("Recall API ready (hybrid search enabled)")
     
     yield
@@ -232,9 +241,57 @@ API_INFO.info({
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
 
+async def update_health_metrics():
+    """Update component health and document count metrics."""
+    global db, fts_index
+    
+    # Check Ollama
+    ollama_up = 0
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{settings.ollama_url}/api/tags", timeout=3.0)
+            if resp.status_code == 200:
+                ollama_up = 1
+    except:
+        pass
+    
+    # Check LanceDB
+    lancedb_up = 0
+    try:
+        if db and db.table_names() is not None:
+            lancedb_up = 1
+    except:
+        pass
+    
+    # Check FTS
+    fts_up = 1 if fts_index else 0
+    
+    # Update health gauges
+    COMPONENT_UP.labels(component="ollama").set(ollama_up)
+    COMPONENT_UP.labels(component="lancedb").set(lancedb_up)
+    COMPONENT_UP.labels(component="fts").set(fts_up)
+    
+    # Update document counts
+    try:
+        if db and "work" in db.table_names():
+            INDEX_DOCUMENTS.labels(vault="work", index_type="vector").set(db.open_table("work").count_rows())
+        if db and "personal" in db.table_names():
+            INDEX_DOCUMENTS.labels(vault="personal", index_type="vector").set(db.open_table("personal").count_rows())
+        if fts_index:
+            try:
+                INDEX_DOCUMENTS.labels(vault="work", index_type="fts").set(fts_index.get_document_count("work"))
+                INDEX_DOCUMENTS.labels(vault="personal", index_type="fts").set(fts_index.get_document_count("personal"))
+            except:
+                pass
+    except:
+        pass
+
+
 @app.get("/metrics", tags=["monitoring"], include_in_schema=True)
 async def metrics():
     """Prometheus metrics endpoint."""
+    # Update health metrics on each scrape
+    await update_health_metrics()
     return Response(
         content=generate_latest(),
         media_type=CONTENT_TYPE_LATEST
