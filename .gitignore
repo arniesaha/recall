@@ -52,3 +52,4 @@ n8n/*.json
 ui/.env.production
 ui/.env.local
 helm/values.yaml
+TODO.md
