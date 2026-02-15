@@ -62,8 +62,8 @@ GPU_WAKE_TIMEOUT = 180  # 3 minutes to wake
 GPU_INDEX_TIMEOUT = 1800  # 30 minutes max for indexing
 POLL_INTERVAL = 30  # Check progress every 30s
 
-# Vault paths (for pre-check)
-OBSIDIAN_WORK_PATH = Path(os.environ.get("OBSIDIAN_WORK_PATH", "/home/Arnab/clawd/projects/recall/obsidian/work"))
+# Vault paths (for pre-check) - must be set via environment variable
+OBSIDIAN_WORK_PATH = Path(os.environ.get("OBSIDIAN_WORK_PATH", "./obsidian/work"))
 LAST_INDEX_FILE = SCRIPT_DIR.parent / "logs" / ".last_index_time"
 
 

@@ -19,7 +19,7 @@ from typing import Dict, List, Set, Tuple, Optional
 from collections import defaultdict
 
 # Paths
-VAULT_PATH = Path("/home/Arnab/clawd/projects/recall/obsidian/work")
+VAULT_PATH = Path(os.environ.get("VAULT_PATH", "./obsidian/work"))
 DAILY_NOTES_PATH = VAULT_PATH / "daily-notes"
 PEOPLE_PATH = VAULT_PATH / "people"
 INTERVIEWS_PATH = VAULT_PATH / "interviews"
