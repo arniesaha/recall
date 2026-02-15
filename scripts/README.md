@@ -1,65 +1,47 @@
 # Scripts
 
-Utility scripts for managing the knowledge graph.
+Utility scripts for Recall.
 
-## ⚠️ Configuration Required
+## Configuration
 
-These scripts contain hardcoded paths that you'll need to update for your environment:
+All scripts use environment variables for paths. Set them in your `.env` file or export them:
 
-- `VAULT_PATH` — Path to your Obsidian vault
-- `OUTPUT_PATH` — Path for organized output
-- Log file paths
+```bash
+export OBSIDIAN_WORK_PATH=/path/to/your/obsidian/work
+export VAULT_PATH=/path/to/your/obsidian/work
+```
 
-Search for `/home/` or your username and update accordingly.
+See `../.env.example` for all available options.
 
 ## Available Scripts
 
-### daily_sync.py
+### daily_vault_sync.py
 
-Main synchronization script. Processes new transcripts and organizes them:
-
-- Categorizes by person, project, or team
-- Handles deduplication (multiple recordings of same meeting)
-- Triggers reindexing via API
+Main synchronization script. Wakes GPU PC, triggers indexing, and monitors progress.
 
 ```bash
-python3 scripts/daily_sync.py
-python3 scripts/daily_sync.py --full  # Full rescan
+python3 scripts/daily_vault_sync.py
 ```
 
-### cleanup_sources.py
+### reorganize_v2.py
 
-Removes processed source files after successful sync.
+Vault reorganization tool. Consolidates duplicate folders, improves categorization.
 
 ```bash
-python3 scripts/cleanup_sources.py
+python3 scripts/reorganize_v2.py --dry-run  # Preview changes
+python3 scripts/reorganize_v2.py            # Apply changes
 ```
 
-### analyze_meetings.py
+## Infrastructure Scripts
 
-Analyzes meeting patterns and generates reports.
+### gpu-shutdown-server.py
 
-### generate_insights.py
+HTTP server for remote GPU PC shutdown. See `GPU-SETUP.md` for setup.
 
-Extracts insights and action items from meetings.
+### wol-server.py
 
-### reorganize_vault.py
-
-One-time reorganization of existing vault structure.
-
-### process_remaining.py
-
-Processes any files that weren't handled by daily_sync.
+Wake-on-LAN server for waking the GPU PC remotely.
 
 ## Automation
 
-### Cron
-
-```bash
-# Daily at 6 AM
-0 6 * * * cd /path/to/knowledge-graph && python3 scripts/daily_sync.py
-```
-
-### n8n
-
-See `n8n/README.md` for workflow-based automation.
+Set up a cron job or use the Recall API's built-in scheduling.
