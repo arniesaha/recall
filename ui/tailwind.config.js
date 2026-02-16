@@ -9,19 +9,19 @@ export default {
     extend: {
       colors: {
         bg: {
-          primary: '#0d0d0d',
-          secondary: '#1a1a1a',
-          tertiary: '#262626',
+          primary: 'var(--bg-primary)',
+          secondary: 'var(--bg-secondary)',
+          tertiary: 'var(--bg-tertiary)',
         },
         text: {
-          primary: '#e5e5e5',
-          secondary: '#a3a3a3',
+          primary: 'var(--text-primary)',
+          secondary: 'var(--text-secondary)',
         },
         accent: {
-          DEFAULT: '#3b82f6',
-          muted: '#1d4ed8',
+          DEFAULT: 'var(--accent)',
+          muted: 'var(--accent-muted)',
         },
-        border: '#333333',
+        border: 'var(--border)',
       },
       fontFamily: {
         sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],

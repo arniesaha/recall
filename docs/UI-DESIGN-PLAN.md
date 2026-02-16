@@ -309,12 +309,12 @@ xl: 1280px  /* Desktops */
 - [ ] PDF viewer with page navigation
 - [ ] Search filters (date, vault, person)
 
-### Future (Phase 3)
-- [ ] Create new notes
-- [ ] Tags management
-- [ ] Favorites/bookmarks
-- [ ] Share note links
-- [ ] Voice search
+### Future (Phase 3) - COMPLETE
+- [x] Create new notes *(API ready, requires writable volume mount)*
+- [x] Tags management — Display/filter by tags on Home page
+- [x] Favorites/bookmarks — Star notes, localStorage persistence, favorites section
+- [x] Share note links — Copy shareable URL to clipboard
+- [ ] Voice search — Skipped (complexity)
 
 ---
 
@@ -366,6 +366,18 @@ recall-ui/
 
 ## Recent Updates
 
+### v1.2 - Phase 3 Features (2026-02-15)
+Added social and organization features:
+- **Tags management**: `GET /notes/tags` API, TagsList component with frequency coloring
+- **Favorites/bookmarks**: useFavorites hook (localStorage), star button in NoteViewer
+- **Share note links**: Copy shareable URL to clipboard from NoteViewer
+- **Create new notes**: `POST /notes` API, CreateNoteModal component
+  - Note: Requires writable volume mount (obsidian volume is read-only by default)
+- **Direct note links**: `/note?path=...` URLs now work for sharing
+- New components: CreateNoteModal, TagsList, FavoritesList
+- New hooks: useFavorites
+- New API endpoints: POST /notes, GET /notes/tags, GET /notes/folders, GET /notes/recent
+
 ### v1.1 - Temporal Search (2026-02-14)
 Added date-aware filtering to search:
 - "this week", "last month", "yesterday" auto-filter results
@@ -380,4 +392,4 @@ Added date-aware filtering to search:
 
 ---
 
-*Last updated: 2026-02-14*
+*Last updated: 2026-02-15*

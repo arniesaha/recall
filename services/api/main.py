@@ -1059,6 +1059,132 @@ async def get_notes_tree():
     return NoteTreeResponse(tree=result, total_files=total)
 
 
+@app.get("/notes/recent")
+async def get_recent_notes(limit: int = 10):
+    """Get recently modified notes."""
+    import os
+    from pathlib import Path
+    
+    notes = []
+    
+    vault_paths = {
+        'work': Path(settings.vault_work_path),
+        'personal': Path(settings.vault_personal_path)
+    }
+    
+    for vault, vault_path in vault_paths.items():
+        if not vault_path.exists():
+            continue
+        
+        for root, dirs, files in os.walk(vault_path):
+            for file in files:
+                if not file.endswith('.md'):
+                    continue
+                if file.startswith('.'):
+                    continue
+                
+                full_path = Path(root) / file
+                rel_path = full_path.relative_to(vault_path.parent)
+                mtime = os.path.getmtime(full_path)
+                
+                notes.append({
+                    'path': str(rel_path),
+                    'title': file.replace('.md', ''),
+                    'vault': vault,
+                    'modified': datetime.fromtimestamp(mtime).isoformat(),
+                    'mtime': mtime
+                })
+    
+    # Sort by modification time, most recent first
+    notes.sort(key=lambda x: x['mtime'], reverse=True)
+    
+    # Remove mtime from response and limit
+    for note in notes:
+        del note['mtime']
+    
+    return {"notes": notes[:limit]}
+
+
+@app.get("/notes/tags")
+async def get_all_tags(vault: Optional[str] = "all", limit: int = 50):
+    """Get all unique tags from notes, sorted by frequency."""
+    import os
+    import re
+    from pathlib import Path
+    from collections import Counter
+    
+    tag_counts = Counter()
+    tag_pattern = re.compile(r'#([a-zA-Z][a-zA-Z0-9_\-]*)')
+    
+    vault_paths = {}
+    if vault in ["all", "work"]:
+        vault_paths['work'] = Path(settings.vault_work_path)
+    if vault in ["all", "personal"]:
+        vault_paths['personal'] = Path(settings.vault_personal_path)
+    
+    for v_name, vault_path in vault_paths.items():
+        if not vault_path.exists():
+            continue
+        
+        for root, dirs, files in os.walk(vault_path):
+            for file in files:
+                if not file.endswith('.md'):
+                    continue
+                if file.startswith('.'):
+                    continue
+                
+                full_path = Path(root) / file
+                try:
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # Find all tags in content
+                    tags = tag_pattern.findall(content)
+                    for tag in tags:
+                        tag_counts[tag.lower()] += 1
+                except Exception:
+                    continue
+    
+    # Sort by count descending, then alphabetically
+    sorted_tags = sorted(
+        tag_counts.items(),
+        key=lambda x: (-x[1], x[0])
+    )[:limit]
+    
+    return {
+        "tags": [{"name": tag, "count": count} for tag, count in sorted_tags],
+        "total": len(tag_counts)
+    }
+
+
+@app.get("/notes/folders")
+async def get_folders(vault: str = "work"):
+    """Get list of folders for note creation dropdown."""
+    import os
+    from pathlib import Path
+    
+    folders = []
+    
+    if vault == "personal":
+        vault_path = Path(settings.vault_personal_path)
+    else:
+        vault_path = Path(settings.vault_work_path)
+    
+    if not vault_path.exists():
+        return {"folders": []}
+    
+    for root, dirs, files in os.walk(vault_path):
+        # Skip hidden directories
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        
+        rel_path = Path(root).relative_to(vault_path)
+        if str(rel_path) != '.':
+            folders.append(str(rel_path))
+    
+    folders.sort()
+    return {"folders": folders}
+
+
 @app.get("/notes/{path:path}", response_model=NoteResponse)
 async def get_note(path: str):
     """Get the full content of a note by path."""
@@ -1130,6 +1256,72 @@ async def get_note(path: str):
         )
 
 
+class CreateNoteRequest(BaseModel):
+    title: str
+    content: str
+    vault: str = "work"  # "work" or "personal"
+    folder: Optional[str] = None  # Optional subfolder path
+
+
+@app.post("/notes")
+async def create_note(request: CreateNoteRequest):
+    """Create a new note."""
+    from pathlib import Path
+    import re
+    
+    # Security: prevent path traversal in title and folder
+    if '..' in request.title or request.title.startswith('/'):
+        raise HTTPException(status_code=400, detail="Invalid title")
+    if request.folder and ('..' in request.folder or request.folder.startswith('/')):
+        raise HTTPException(status_code=400, detail="Invalid folder path")
+    
+    # Sanitize title for filename
+    safe_title = re.sub(r'[^\w\s\-]', '', request.title).strip()
+    safe_title = re.sub(r'\s+', '-', safe_title).lower()
+    if not safe_title:
+        safe_title = f"note-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    
+    # Determine vault path
+    if request.vault == "personal":
+        vault_path = Path(settings.vault_personal_path)
+    else:
+        vault_path = Path(settings.vault_work_path)
+    
+    # Build full path
+    if request.folder:
+        target_dir = vault_path / request.folder
+    else:
+        target_dir = vault_path
+    
+    # Create directory if it doesn't exist
+    target_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create filename with .md extension
+    filename = f"{safe_title}.md"
+    full_path = target_dir / filename
+    
+    # Check if file already exists
+    counter = 1
+    while full_path.exists():
+        filename = f"{safe_title}-{counter}.md"
+        full_path = target_dir / filename
+        counter += 1
+    
+    # Write content
+    with open(full_path, 'w', encoding='utf-8') as f:
+        f.write(request.content)
+    
+    # Return relative path from vault
+    rel_path = full_path.relative_to(vault_path.parent)
+    
+    return {
+        "status": "created",
+        "path": str(rel_path),
+        "filename": filename,
+        "vault": request.vault
+    }
+
+
 @app.put("/notes/{path:path}")
 async def update_note(path: str, content: str = None, body: dict = None):
     """Update a note's content."""
@@ -1169,49 +1361,3 @@ async def update_note(path: str, content: str = None, body: dict = None):
         f.write(content)
     
     return {"status": "updated", "path": path}
-
-
-@app.get("/notes/recent")
-async def get_recent_notes(limit: int = 10):
-    """Get recently modified notes."""
-    import os
-    from pathlib import Path
-    
-    notes = []
-    
-    vault_paths = {
-        'work': Path(settings.vault_work_path),
-        'personal': Path(settings.vault_personal_path)
-    }
-    
-    for vault, vault_path in vault_paths.items():
-        if not vault_path.exists():
-            continue
-        
-        for root, dirs, files in os.walk(vault_path):
-            for file in files:
-                if not file.endswith('.md'):
-                    continue
-                if file.startswith('.'):
-                    continue
-                
-                full_path = Path(root) / file
-                rel_path = full_path.relative_to(vault_path.parent)
-                mtime = os.path.getmtime(full_path)
-                
-                notes.append({
-                    'path': str(rel_path),
-                    'title': file.replace('.md', ''),
-                    'vault': vault,
-                    'modified': datetime.fromtimestamp(mtime).isoformat(),
-                    'mtime': mtime
-                })
-    
-    # Sort by modification time, most recent first
-    notes.sort(key=lambda x: x['mtime'], reverse=True)
-    
-    # Remove mtime from response and limit
-    for note in notes:
-        del note['mtime']
-    
-    return {"notes": notes[:limit]}

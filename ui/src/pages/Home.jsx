@@ -1,16 +1,49 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Brain, Zap, Clock, Tag } from 'lucide-react'
+import { Brain, Zap, Clock, Tag, X, History } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
+import TagsList from '../components/TagsList'
+import FavoritesList from '../components/FavoritesList'
+import NoteViewer from '../components/NoteViewer'
+import { useRecentSearches } from '../hooks/useRecentSearches'
+import { getNote } from '../api/recall'
 
 export default function Home() {
   const navigate = useNavigate()
+  const { recentSearches, addSearch, removeSearch, clearSearches } = useRecentSearches()
+  const [selectedNote, setSelectedNote] = useState(null)
+  const [noteLoading, setNoteLoading] = useState(false)
 
   const handleSearch = (query, vault = 'work') => {
+    addSearch(query)
     navigate(`/search?q=${encodeURIComponent(query)}&vault=${vault}`)
   }
 
-  const recentSearches = [
+  const handleTagClick = (tagName) => {
+    // Search for notes with this tag
+    handleSearch(`#${tagName}`)
+  }
+
+  const handleFavoriteClick = async (fav) => {
+    setNoteLoading(true)
+    try {
+      const noteData = await getNote(fav.file_path)
+      setSelectedNote({
+        file_path: fav.file_path,
+        title: noteData?.title || fav.title,
+        content: noteData?.content || 'No content available',
+        excerpt: noteData?.content || 'No content available',
+        vault: fav.vault,
+        modified: noteData?.modified || ''
+      })
+    } catch (err) {
+      console.error('Failed to load favorite note:', err)
+    } finally {
+      setNoteLoading(false)
+    }
+  }
+
+  const suggestedSearches = [
     'Action items from 1:1s',
     'Project timelines',
     'Meeting notes from last week'
@@ -46,11 +79,54 @@ export default function Home() {
         />
       </div>
 
-      {/* Recent searches */}
+      {/* Recent searches from localStorage */}
+      {recentSearches.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-text-secondary flex items-center gap-2">
+              <History className="w-4 h-4" />
+              Recent searches
+            </h3>
+            <button
+              onClick={clearSearches}
+              className="text-xs text-text-secondary hover:text-text-primary transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {recentSearches.slice(0, 6).map((search, idx) => (
+              <div
+                key={idx}
+                className="group flex items-center gap-1 px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-sm text-text-secondary hover:text-text-primary hover:border-accent/30 transition-colors"
+              >
+                <button
+                  onClick={() => handleSearch(search)}
+                  className="hover:text-accent"
+                >
+                  {search}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    removeSearch(search)
+                  }}
+                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 transition-all"
+                  title="Remove"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Suggested searches */}
       <div className="mb-8">
         <h3 className="text-sm font-medium text-text-secondary mb-3">Try asking:</h3>
         <div className="flex flex-wrap gap-2">
-          {recentSearches.map((search, idx) => (
+          {suggestedSearches.map((search, idx) => (
             <button
               key={idx}
               onClick={() => handleSearch(search)}
@@ -79,6 +155,16 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Favorites section */}
+      <div className="mt-8">
+        <FavoritesList onNoteClick={handleFavoriteClick} maxVisible={4} />
+      </div>
+
+      {/* Tags section */}
+      <div className="mt-8">
+        <TagsList onTagClick={handleTagClick} maxVisible={10} />
+      </div>
+
       {/* Features hint */}
       <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
         {[
@@ -92,6 +178,24 @@ export default function Home() {
           </div>
         ))}
       </div>
+
+      {/* Note viewer modal for favorites */}
+      {selectedNote && (
+        <NoteViewer
+          note={selectedNote}
+          onClose={() => setSelectedNote(null)}
+        />
+      )}
+
+      {/* Loading overlay */}
+      {noteLoading && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-bg-secondary border border-border rounded-xl p-6 flex items-center gap-3">
+            <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+            <span>Loading note...</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

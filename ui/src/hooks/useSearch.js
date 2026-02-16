@@ -14,8 +14,14 @@ export function useSearch() {
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [error, setError] = useState(null)
   const [detectedPerson, setDetectedPerson] = useState(null)
+  const [filters, setFilters] = useState({
+    dateFilter: null,
+    dateFrom: null,
+    dateTo: null,
+    personFilter: null
+  })
 
-  const performSearch = useCallback(async (searchQuery, vaultFilter = 'work', personFilter = null) => {
+  const performSearch = useCallback(async (searchQuery, vaultFilter = 'work', searchFilters = {}) => {
     if (!searchQuery.trim()) {
       setResults([])
       setAiAnswer(null)
@@ -31,13 +37,21 @@ export function useSearch() {
 
     // Detect if this is a person-related query
     const personDetection = detectPersonQuery(searchQuery)
-    const effectivePerson = personFilter || (personDetection.isPerson ? personDetection.personName : null)
+    const effectivePerson = searchFilters.personFilter || (personDetection.isPerson ? personDetection.personName : null)
     setDetectedPerson(personDetection.isPerson ? personDetection.personName : null)
+
+    // Build search options
+    const searchOptions = {
+      vault: vaultFilter,
+      person: effectivePerson,
+      dateFrom: searchFilters.dateFrom,
+      dateTo: searchFilters.dateTo
+    }
 
     try {
       // Run search and RAG query in parallel
       const [searchResults, ragResponse] = await Promise.all([
-        search(searchQuery, 10, effectivePerson, vaultFilter),
+        search(searchQuery, 10, searchOptions),
         queryRAG(searchQuery, 5, vaultFilter)
       ])
 
@@ -81,12 +95,22 @@ export function useSearch() {
     }
   }, [])
 
+  const updateFilters = useCallback((newFilters) => {
+    setFilters(prev => ({ ...prev, ...newFilters }))
+  }, [])
+
   const clearSearch = useCallback(() => {
     setQuery('')
     setResults([])
     setAiAnswer(null)
     setError(null)
     setDetectedPerson(null)
+    setFilters({
+      dateFilter: null,
+      dateFrom: null,
+      dateTo: null,
+      personFilter: null
+    })
   }, [])
 
   return {
@@ -98,7 +122,9 @@ export function useSearch() {
     isAiLoading,
     error,
     detectedPerson,
+    filters,
     performSearch,
+    updateFilters,
     clearSearch
   }
 }

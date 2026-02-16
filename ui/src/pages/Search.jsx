@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { AlertCircle, ArrowLeft } from 'lucide-react'
 import SearchBar from '../components/SearchBar'
+import SearchFilters from '../components/SearchFilters'
 import AIAnswer from '../components/AIAnswer'
 import SearchResults from '../components/SearchResults'
 import NoteViewer from '../components/NoteViewer'
 import { useSearch } from '../hooks/useSearch'
+import { useRecentSearches } from '../hooks/useRecentSearches'
 
 export default function Search() {
   const [searchParams] = useSearchParams()
@@ -22,22 +24,36 @@ export default function Search() {
     isAiLoading,
     error,
     detectedPerson,
+    filters,
     performSearch,
+    updateFilters,
     clearSearch
   } = useSearch()
 
+  const { addSearch } = useRecentSearches()
   const [selectedNote, setSelectedNote] = useState(null)
 
   // Perform search on mount if query param exists
   useEffect(() => {
     if (initialQuery && initialQuery !== query) {
-      performSearch(initialQuery, initialVault)
+      addSearch(initialQuery)
+      performSearch(initialQuery, initialVault, filters)
     }
   }, [initialQuery, initialVault])
 
   const handleSearch = (newQuery, newVault = 'work') => {
+    addSearch(newQuery)
     navigate(`/search?q=${encodeURIComponent(newQuery)}&vault=${newVault}`, { replace: true })
-    performSearch(newQuery, newVault)
+    performSearch(newQuery, newVault, filters)
+  }
+
+  const handleFilterChange = (newFilters) => {
+    updateFilters(newFilters)
+    // Re-run search with new filters
+    if (query) {
+      const mergedFilters = { ...filters, ...newFilters }
+      performSearch(query, vault, mergedFilters)
+    }
   }
 
   const handleResultClick = (result, idx) => {
@@ -46,6 +62,18 @@ export default function Search() {
 
   const handleCloseViewer = () => {
     setSelectedNote(null)
+  }
+
+  const handleNoteUpdated = (path, newContent) => {
+    // Update the selected note content locally
+    if (selectedNote && selectedNote.file_path === path) {
+      setSelectedNote(prev => ({
+        ...prev,
+        content: newContent,
+        excerpt: newContent
+      }))
+    }
+    // Could also refresh results here if needed
   }
 
   return (
@@ -60,13 +88,24 @@ export default function Search() {
       </button>
 
       {/* Search bar */}
-      <div className="mb-6">
+      <div className="mb-4">
         <SearchBar
           onSearch={handleSearch}
           isLoading={isLoading}
           initialQuery={initialQuery}
           initialVault={initialVault}
           size="normal"
+        />
+      </div>
+
+      {/* Filters */}
+      <div className="mb-6">
+        <SearchFilters
+          onFilterChange={handleFilterChange}
+          dateFilter={filters.dateFilter}
+          dateFrom={filters.dateFrom}
+          dateTo={filters.dateTo}
+          personFilter={filters.personFilter}
         />
       </div>
 
@@ -102,7 +141,7 @@ export default function Search() {
       {!isLoading && !error && query && results.length === 0 && (
         <div className="text-center py-12 text-text-secondary">
           <p className="text-lg mb-2">No results found</p>
-          <p className="text-sm">Try a different search query</p>
+          <p className="text-sm">Try a different search query or adjust your filters</p>
         </div>
       )}
 
@@ -111,6 +150,7 @@ export default function Search() {
         <NoteViewer
           note={selectedNote}
           onClose={handleCloseViewer}
+          onNoteUpdated={handleNoteUpdated}
         />
       )}
     </div>

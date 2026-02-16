@@ -2,9 +2,9 @@ import { useState, useRef } from 'react'
 import { Search, X, Loader2, Building2, User, Globe } from 'lucide-react'
 
 const VAULT_OPTIONS = [
-  { value: 'work', label: 'Work', icon: Building2, shortLabel: 'W' },
-  { value: 'personal', label: 'Personal', icon: User, shortLabel: 'P' },
-  { value: 'all', label: 'All', icon: Globe, shortLabel: 'A' },
+  { value: 'work', label: 'Work', Icon: Building2, shortLabel: 'W' },
+  { value: 'personal', label: 'Personal', Icon: User, shortLabel: 'P' },
+  { value: 'all', label: 'All', Icon: Globe, shortLabel: 'A' },
 ]
 
 export default function SearchBar({ 
@@ -105,7 +105,7 @@ export default function SearchBar({
             `}
             title={`Search in: ${currentVault?.label}`}
           >
-            {currentVault && <currentVault.icon className="w-4 h-4" />}
+            {currentVault && <currentVault.Icon className="w-4 h-4" />}
             <span className="hidden sm:inline">{currentVault?.label}</span>
             <span className="sm:hidden">{currentVault?.shortLabel}</span>
           </button>
@@ -124,7 +124,7 @@ export default function SearchBar({
                     ${vault === option.value ? 'text-accent' : 'text-text-primary'}
                   `}
                 >
-                  <option.icon className="w-4 h-4" />
+                  <option.Icon className="w-4 h-4" />
                   <span>{option.label}</span>
                   {vault === option.value && (
                     <span className="ml-auto text-xs">✓</span>

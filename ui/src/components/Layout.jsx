@@ -1,13 +1,18 @@
+import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Brain, Search, FolderTree, Settings } from 'lucide-react'
+import { Brain, Search, FolderTree, Sun, Moon, Plus } from 'lucide-react'
+import { useTheme } from '../hooks/useTheme'
+import CreateNoteModal from './CreateNoteModal'
 
 export default function Layout({ children }) {
   const location = useLocation()
   const isHome = location.pathname === '/'
   const isBrowse = location.pathname === '/browse'
+  const { theme, toggleTheme } = useTheme()
+  const [showCreateModal, setShowCreateModal] = useState(false)
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-bg-primary text-text-primary">
       {/* Header */}
       <header className="border-b border-border bg-bg-secondary/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
@@ -17,6 +22,15 @@ export default function Layout({ children }) {
           </Link>
 
           <nav className="flex items-center gap-2">
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-muted text-white text-sm font-medium transition-colors"
+              title="Create new note"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">New</span>
+            </button>
+            <div className="w-px h-6 bg-border mx-1" />
             <Link
               to="/"
               className={`p-2 rounded-lg transition-colors ${
@@ -36,10 +50,15 @@ export default function Layout({ children }) {
               <FolderTree className="w-5 h-5" />
             </Link>
             <button
+              onClick={toggleTheme}
               className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors"
-              title="Settings"
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             >
-              <Settings className="w-5 h-5" />
+              {theme === 'dark' ? (
+                <Sun className="w-5 h-5" />
+              ) : (
+                <Moon className="w-5 h-5" />
+              )}
             </button>
           </nav>
         </div>
@@ -56,6 +75,16 @@ export default function Layout({ children }) {
           Press <kbd className="px-1.5 py-0.5 bg-bg-tertiary rounded text-xs font-mono mx-1">⌘K</kbd> to search
         </span>
       </footer>
+
+      {/* Create Note Modal */}
+      <CreateNoteModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onNoteCreated={(note) => {
+          console.log('Note created:', note)
+          // Could navigate to the note or refresh
+        }}
+      />
     </div>
   )
 }
