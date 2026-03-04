@@ -3,6 +3,74 @@ import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+/**
+ * Post-process the AI answer to convert inline source citations like
+ * "(Source: Reliability initiative planning with Vijay, 2026-03-02)"
+ * into clickable markdown links pointing to /note?path=...
+ */
+function linkifySources(text, sources) {
+  if (!text || !sources || sources.length === 0) return text
+
+  // Build a lookup: normalize title → source object
+  const sourceMap = new Map()
+  for (const s of sources) {
+    const title = (s.title || '').trim()
+    if (title) {
+      sourceMap.set(title.toLowerCase(), s)
+      // Also index without date suffix for fuzzy match
+      const noDate = title.replace(/\s*[-–]\s*\d{4}[-/]\d{2}[-/]\d{2}$/, '').trim()
+      if (noDate) sourceMap.set(noDate.toLowerCase(), s)
+    }
+  }
+
+  // Match patterns: (Source: <title>, <date>) or (Source: <title>)
+  // Also handles **Source:** and variations
+  return text.replace(
+    /\((?:\*{0,2})Source:?\*{0,2}\s*([^,)]+?)(?:,\s*(\d{4}-\d{2}-\d{2}))?\)/gi,
+    (match, rawTitle, date) => {
+      const title = rawTitle.trim()
+      const key = title.toLowerCase()
+      
+      // Try exact match, then fuzzy
+      let source = sourceMap.get(key)
+      if (!source) {
+        // Try matching by checking if any source title contains this text or vice versa
+        for (const [k, v] of sourceMap) {
+          if (k.includes(key) || key.includes(k)) {
+            source = v
+            break
+          }
+        }
+      }
+      // Also try matching by date if title didn't match
+      if (!source && date) {
+        for (const s of sources) {
+          if (s.date === date) {
+            const sTitle = (s.title || '').toLowerCase()
+            // Check partial overlap
+            const words = key.split(/\s+/)
+            const matchCount = words.filter(w => sTitle.includes(w)).length
+            if (matchCount >= words.length * 0.5) {
+              source = s
+              break
+            }
+          }
+        }
+      }
+
+      if (source) {
+        const filePath = (source.file || '').replace(/^\/data\/obsidian\//, '')
+        const noteUrl = `/note?path=${encodeURIComponent(filePath)}`
+        const displayDate = date || source.date || ''
+        const label = displayDate ? `${title}, ${displayDate}` : title
+        return `([${label}](${noteUrl}))`
+      }
+      
+      return match // No match found, leave as-is
+    }
+  )
+}
+
 export default function AIAnswer({ 
   answer, 
   sources = [], 
@@ -42,8 +110,23 @@ export default function AIAnswer({
       </div>
 
       <div className="prose-recall">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {answer}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // Render links with React Router navigation + accent styling
+            a: ({ href, children, ...props }) => {
+              if (href?.startsWith('/note')) {
+                return (
+                  <Link to={href} className="text-accent hover:text-accent-muted underline decoration-accent/40 hover:decoration-accent transition-colors" {...props}>
+                    {children}
+                  </Link>
+                )
+              }
+              return <a href={href} className="text-accent hover:text-accent-muted underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+            }
+          }}
+        >
+          {linkifySources(answer, sources)}
         </ReactMarkdown>
       </div>
 
@@ -71,9 +154,9 @@ export default function AIAnswer({
 
       {sources && sources.length > 0 && (
         <div className="mt-4 pt-4 border-t border-border">
-          <div className="text-sm text-text-secondary mb-2">Sources:</div>
+          <div className="text-sm font-medium text-accent mb-2">📎 Sources ({Math.min(sources.length, 5)} of {sources.length})</div>
           <div className="flex flex-col gap-2">
-            {sources.map((source, idx) => {
+            {sources.slice(0, 5).map((source, idx) => {
               // Convert absolute path to API-compatible path
               const filePath = (source.file || '')
                 .replace(/^\/data\/obsidian\//, '')
