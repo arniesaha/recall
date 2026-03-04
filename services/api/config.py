@@ -1,5 +1,6 @@
 """
-Configuration settings for note-rag API
+Configuration settings for Recall API
+Simplified: BM25 (FTS5) + Gemini Flash only. No Ollama, no vectors.
 """
 
 from pydantic_settings import BaseSettings
@@ -11,26 +12,6 @@ class Settings(BaseSettings):
     api_token: str = "changeme"
     log_level: str = "INFO"
     
-    # Ollama (local/default)
-    ollama_url: str = "http://ollama:11434"
-    embedding_model: str = "nomic-embed-text"
-    embedding_dimensions: int = 768
-    
-    # GPU Offload (remote Ollama on GPU machine)
-    gpu_ollama_url: str = "http://10.10.10.2:11434"
-    gpu_ollama_enabled: bool = True
-    gpu_wol_mac: str = "60:cf:84:cb:3f:aa"
-    gpu_wol_broadcast: str = "10.10.10.255"
-    gpu_boot_wait_seconds: int = 5  # n8n webhook already has 40s sleep built in
-    gpu_health_timeout_seconds: int = 120
-    gpu_auto_shutdown: bool = True  # Shutdown GPU PC after indexing
-    gpu_shutdown_url: str = "http://10.10.10.2:8765/shutdown"
-    gpu_shutdown_secret: str = "gpu-shutdown-ok"
-    gpu_wol_server_url: str = "http://192.168.1.70:9753"  # WoL HTTP server on NAS host
-    
-    # LanceDB
-    lancedb_path: str = "/data/lancedb"
-    
     # Vaults (Markdown)
     vault_work_path: str = "/data/obsidian/work"
     vault_personal_path: str = "/data/obsidian/personal"
@@ -41,10 +22,11 @@ class Settings(BaseSettings):
     pdf_personal_path: str = "/data/pdfs/personal"
     pdf_enabled: bool = True
     
-    # Indexing
+    # FTS Indexing
     chunk_size: int = 500
     chunk_overlap: int = 50
-    transcript_chunk_multiplier: float = 2.5  # Larger chunks for transcripts (2.5x = ~5000 chars)
+    transcript_chunk_multiplier: float = 2.5
+    fts_db_path: str = "/data/lancedb/fts_index.db"  # Keep same path for compatibility
     
     # Noise filtering for transcripts
     filter_transcript_noise: bool = True
@@ -52,30 +34,12 @@ class Settings(BaseSettings):
     
     # Search
     default_search_limit: int = 10
-    similarity_threshold: float = 0.7
-    
-    # Source boosting (daily-notes/summaries over transcripts)
-    boost_daily_notes: bool = True
-    daily_notes_boost: float = 1.15  # 15% boost for daily-notes (summaries)
-    transcript_penalty: float = 0.90  # 10% penalty for raw transcripts
-    
-    # RAG
     max_context_chunks: int = 5
     
-    # PageIndex settings (vectorless RAG for PDFs)
-    pageindex_enabled: bool = True
-    pageindex_tree_dir: str = "/data/trees"
-    
-    # LLM Provider for PageIndex: "gpu" (primary, free), "max" (needs API mode enabled)
-    pageindex_llm_provider: str = "gpu"
-    
-    # Max (Mac Mini) - Primary, always on
-    max_gateway_url: str = "http://arnabs-mac-mini.local:18789"
-    max_gateway_token: str = ""  # Set from env: MAX_GATEWAY_TOKEN
-    max_model: str = "anthropic/claude-sonnet-4-5"
-    
-    # GPU PC - Fallback (free but needs wake)
-    gpu_model: str = "qwen2.5:32b"
+    # Source boosting
+    boost_daily_notes: bool = True
+    daily_notes_boost: float = 1.15
+    transcript_penalty: float = 0.90
     
     class Config:
         env_file = ".env"

@@ -1,352 +1,83 @@
-# Recall — Architecture Document
+# Recall Architecture — v3 (Vectorless)
 
-**Version:** 1.1
-**Date:** 2026-02-14
-**Status:** Active
+## Overview
 
----
+Recall is a personal knowledge base search engine that reads directly from an Obsidian vault.
+It uses **BM25 keyword search** (SQLite FTS5) for retrieval and **Gemini Flash** for answer generation.
 
-## 1. System Overview
+**No vector embeddings. No GPU. No Ollama.**
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                   NAS                                        │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                         Kubernetes (k3s)                            │   │
-│  │                                                                      │   │
-│  │   ┌─────────────┐                       ┌─────────────────────┐    │   │
-│  │   │   Ollama    │                       │    Recall API       │    │   │
-│  │   │   (CPU)     │                       │     (FastAPI)       │    │   │
-│  │   │             │                       │                     │    │   │
-│  │   │ nomic-embed │◄─────────────────────►│  /search           │    │   │
-│  │   │             │                       │  /query            │    │   │
-│  │   │             │                       │  /prep/{person}    │    │   │
-│  │   └─────────────┘                       │  /index            │    │   │
-│  │                                         │  /health           │    │   │
-│  │   ┌─────────────┐                       │                     │    │   │
-│  │   │ Recall UI   │◄─────────────────────►│    :8080           │    │   │
-│  │   │  (React)    │                       └──────────┬──────────┘    │   │
-│  │   │    :80      │                                  │               │   │
-│  │   └─────────────┘                                  │               │   │
-│  └────────────────────────────────────────────────────┼───────────────┘   │
-│                                                       │                    │
-│  ┌────────────────────────────────────────────────────┼───────────────┐   │
-│  │                        File System                 │               │   │
-│  │                                                    │               │   │
-│  │   /data/                                           │               │   │
-│  │   ├── obsidian/                                    │               │   │
-│  │   │   ├── work/        (meeting notes, 1:1s)      │ File Watcher  │   │
-│  │   │   │   ├── daily-notes/                        │ (incremental) │   │
-│  │   │   │   └── Granola/Transcripts/                │               │   │
-│  │   │   └── personal/    (personal notes)           │               │   │
-│  │   │                                               │               │   │
-│  │   ├── pdfs/            (PDF documents)            │               │   │
-│  │   │   ├── work/                                   │               │   │
-│  │   │   └── personal/                               │               │   │
-│  │   │                                               │               │   │
-│  │   └── lancedb/         (vector database)     ◄────┘               │   │
-│  │       ├── work/        (~20k vectors)                             │   │
-│  │       └── personal/    (~100 vectors)                             │   │
-│  │                                                                    │   │
-│  └────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      │ HTTPS (Cloudflare Tunnel)
-                                      ▼
-                          ┌─────────────────────┐
-                          │   External Access   │
-                          │   recall.domain.com │
-                          └─────────────────────┘
+Query → BM25 (SQLite FTS5) → Top-K chunks → Gemini 2.5 Flash → Answer
+                                    ↓
+                           Full files from disk (fullcontext mode)
 ```
 
----
+## Stack
 
-## 2. Components
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| API | FastAPI (Python) | REST endpoints |
+| Search | SQLite FTS5 | BM25 keyword search |
+| LLM | Gemini 2.5 Flash (1M context) | Answer generation |
+| Data | Obsidian vault (Markdown) | Source of truth |
+| Hosting | Kubernetes (k3s) | NodePort 30889 |
+| UI | Vite + React | recall.arnabsaha.com |
 
-### 2.1 Ollama (Embedding Service)
+## Search Modes
 
-**Purpose:** Generate vector embeddings for documents and queries
+### vectorless (default)
+- BM25 retrieves top-50 relevant chunks
+- Name-aware boosting: detects person names, boosts 1:1 notes
+- Source ranking: daily-notes boosted, raw transcripts penalized
+- Temporal parsing: understands "last week", "this month"
+- ~7K tokens context → Gemini Flash → answer
 
-**Model:** `nomic-embed-text`
-- 137M parameters
-- 768-dimension vectors
-- 8192 token context window
-- Optimized for CPU inference
+### fullcontext
+- BM25 finds relevant files
+- Loads FULL file contents from disk (deduped)
+- Up to ~100K tokens stuffed into Gemini
+- Best quality for complex questions spanning multiple meetings
 
-**API:**
-```bash
-POST http://ollama:11434/api/embed
-{
-  "model": "nomic-embed-text",
-  "input": "text to embed"
-}
-```
-
----
-
-### 2.2 LanceDB (Embedded Vector Database)
-
-**Purpose:** Store and search document embeddings
-
-**Why LanceDB:**
-- Embedded library (no separate server process)
-- Data stored as files (easy backup: just copy the folder)
-- Fast vector search with filtering
-- Simple Python API
-
-**Tables:**
-
-| Table | Content | Est. Vectors |
-|-------|---------|--------------|
-| `work` | Work vault chunks | ~20,000 |
-| `personal` | Personal vault chunks | ~100 |
-
-**Schema:**
-```python
-class DocumentChunk(LanceModel):
-    id: str                    # Unique chunk ID
-    vector: Vector(768)        # nomic-embed-text dimension
-    file_path: str
-    file_hash: str             # MD5 for change detection
-    mtime: float               # Modification timestamp
-    title: str
-    category: str              # daily-notes, Granola, etc.
-    people: list[str]          # Mentioned people
-    projects: list[str]        # Mentioned projects
-    date: str                  # YYYY-MM-DD format
-    vault: str                 # "work" or "personal"
-    chunk_index: int
-    content: str               # Actual text content
-    source_type: str           # "markdown" or "pdf"
-    page_number: int | None    # PDF page (1-indexed)
-```
-
----
-
-### 2.3 Recall API (FastAPI)
-
-**Purpose:** Main application service
-
-**Key Endpoints:**
+## Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/search` | POST | Hybrid search (BM25 + Vector) |
+| `/search` | POST | BM25 search (default mode: vectorless) |
+| `/search/vectorless` | POST | Explicit vectorless search |
 | `/query` | POST | RAG query with LLM answer |
-| `/prep/{person}` | GET | 1:1 preparation context |
-| `/index/start` | POST | Trigger indexing job |
-| `/index/progress` | GET | Real-time indexing progress |
+| `/query/vectorless` | POST | Explicit vectorless RAG query |
+| `/health` | GET | Health check (FTS status) |
+| `/stats` | GET | Index statistics |
+| `/index/start` | POST | Trigger FTS reindex |
+| `/index/progress` | GET | Indexing progress |
 
-**Features:**
-- Temporal expression parsing ("this week", "last month")
-- Person-aware search with BM25 boost
-- PDF support with page-aware chunking
-- Prometheus metrics
+## What Was Removed (v3)
 
----
+- ❌ Ollama (embedding generation)
+- ❌ LanceDB (vector storage)
+- ❌ GPU PC wake/sleep cycle
+- ❌ Vector search
+- ❌ Hybrid fusion (RRF)
+- ❌ Reranker (used Ollama)
+- ❌ Daily sync cron job (GPU-dependent)
 
-### 2.4 Recall UI (React)
+## Indexing
 
-**Purpose:** Web interface for search and browsing
+FTS indexing reads all `.md` files from the Obsidian vault, chunks them,
+and inserts into SQLite FTS5. This runs in seconds on CPU — no GPU needed.
 
-**Features:**
-- Natural language search
-- AI-generated answers with sources
-- Note viewer with markdown rendering
-- Folder browsing
-- Mobile responsive
+Trigger manually: `POST /index/start {"full": true}`
 
-**Tech Stack:**
-- React 18 + Vite
-- TailwindCSS
-- React Query
+## Configuration (Environment Variables)
 
----
-
-### 2.5 FTS Index (SQLite FTS5)
-
-**Purpose:** Keyword search for hybrid retrieval
-
-**Why FTS5:**
-- Fast BM25 ranking
-- Handles names better than embeddings
-- Complements semantic search
-
-**Integration:**
-- Maintained alongside LanceDB
-- Updated incrementally with new documents
-- Used in hybrid search with 3:1 BM25 boost for person queries
-
----
-
-## 3. Data Flow
-
-### 3.1 Ingestion Flow
-
-```
-┌────────────┐     ┌────────────┐     ┌────────────┐     ┌────────────┐
-│  Granola   │────▶│  Obsidian  │────▶│    NAS     │────▶│   File     │
-│  Meeting   │     │   Sync     │     │   Vault    │     │  Watcher   │
-└────────────┘     └────────────┘     └────────────┘     └─────┬──────┘
-                                                               │
-     ┌─────────────────────────────────────────────────────────┘
-     │
-     ▼
-┌────────────┐     ┌────────────┐     ┌────────────┐     ┌────────────┐
-│  Extract   │────▶│   Chunk    │────▶│   Embed    │────▶│   Store    │
-│  Metadata  │     │  Content   │     │  (Ollama)  │     │  (Lance)   │
-└────────────┘     └────────────┘     └────────────┘     └────────────┘
-```
-
-### 3.2 Query Flow
-
-```
-┌────────────┐     ┌────────────┐     ┌────────────┐     ┌────────────┐
-│   User     │────▶│  Parse     │────▶│  Hybrid    │────▶│  Retrieve  │
-│   Query    │     │  Temporal  │     │  Search    │     │  Top-K     │
-└────────────┘     └────────────┘     └────────────┘     └─────┬──────┘
-                                                               │
-     ┌─────────────────────────────────────────────────────────┘
-     │
-     ▼
-┌────────────┐     ┌────────────┐     ┌────────────┐
-│  Build     │────▶│    LLM     │────▶│  Return    │
-│  Context   │     │  Generate  │     │  Answer    │
-└────────────┘     └────────────┘     └────────────┘
-```
-
-### 3.3 Search Algorithm
-
-**Hybrid Search with RRF Fusion:**
-1. Parse temporal expressions from query
-2. Run BM25 search (keyword matching)
-3. Run Vector search (semantic matching)
-4. Fuse results using Reciprocal Rank Fusion
-5. Optional: Rerank with small LLM
-
-**Person Query Boost:**
-When names detected in query:
-- BM25 weighted 3:1 vs Vector
-- Name-only search for BM25 (avoids phrase matching issues)
-
----
-
-## 4. Directory Structure
-
-```
-recall/
-├── docs/                        # Project documentation
-│   ├── PRD.md
-│   ├── ARCHITECTURE.md
-│   ├── API.md
-│   └── UI-DESIGN-PLAN.md
-├── data/                        # Data volumes (mounted)
-│   ├── obsidian/
-│   │   ├── work/
-│   │   └── personal/
-│   ├── pdfs/
-│   │   ├── work/
-│   │   └── personal/
-│   └── lancedb/
-├── services/
-│   ├── api/                     # FastAPI backend
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   ├── main.py
-│   │   ├── indexer.py
-│   │   ├── searcher.py
-│   │   ├── temporal.py          # Temporal expression parsing
-│   │   ├── fts_index.py         # BM25 search
-│   │   ├── fusion.py            # RRF fusion
-│   │   └── config.py
-│   └── ui/                      # React frontend
-│       ├── Dockerfile
-│       ├── package.json
-│       └── src/
-├── helm/                        # Kubernetes deployment
-│   ├── Chart.yaml
-│   ├── values.yaml
-│   └── templates/
-├── scripts/                     # Utility scripts
-│   ├── daily_vault_sync.py
-│   └── gpu_offload.py
-└── README.md
-```
-
----
-
-## 5. Deployment
-
-### 5.1 Kubernetes (k3s)
-
-**Services:**
-- `recall` - API deployment (NodePort 30889)
-- `recall-ui` - UI deployment (NodePort 30890)
-- `recall-ollama` - Ollama sidecar (optional, can use external)
-
-**Helm Chart:**
-```bash
-helm upgrade --install recall ./helm -n apps
-```
-
-### 5.2 External Access
-
-Via Cloudflare Tunnel:
-- `recall.domain.com` → UI
-- `recallapi.domain.com` → API (protected)
-
----
-
-## 6. Monitoring
-
-### 6.1 Prometheus Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `recall_search_latency_seconds` | Histogram | Search latency by mode |
-| `recall_search_results_count` | Histogram | Results per search |
-| `recall_rag_query_latency_seconds` | Histogram | RAG latency |
-| `recall_index_progress_percent` | Gauge | Indexing progress |
-
-### 6.2 Grafana Dashboard
-
-Pre-built dashboard with:
-- Search latency percentiles
-- Query throughput
-- Indexing progress
-- Error rates
-
----
-
-## 7. GPU Offload
-
-For faster indexing, supports GPU offload:
-
-1. Wake GPU machine via Wake-on-LAN
-2. API calls GPU machine's Ollama for embeddings
-3. Shutdown GPU machine when done
-
-**Performance:**
-- CPU: ~20 hours for full reindex
-- GPU: ~5 minutes for full reindex
-
----
-
-## 8. Backup
-
-### 8.1 Data to Backup
-- `/data/lancedb/` - Vector database
-- `/data/obsidian/` - Source documents
-- FTS database (if persistent)
-
-### 8.2 Strategy
-- Daily incremental backup of lancedb
-- Weekly full backup
-- Source documents synced from primary (Mac/Granola)
-
----
-
-*Last updated: 2026-02-14*
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_TOKEN` | required | API auth token |
+| `GEMINI_API_KEY` | required | Google Gemini API key |
+| `VECTORLESS_GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model |
+| `VECTORLESS_LLM_BACKEND` | `gemini` | LLM backend (gemini/openclaw) |
+| `VAULT_WORK_PATH` | `/data/obsidian/work` | Work vault mount |
+| `VAULT_PERSONAL_PATH` | `/data/obsidian/personal` | Personal vault mount |

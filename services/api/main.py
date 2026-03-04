@@ -16,11 +16,10 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import datetime
-import lancedb
 import httpx
 
 from indexer import Indexer
-from searcher import Searcher
+from vectorless import VectorlessSearcher
 from config import settings
 
 # Prometheus metrics
@@ -56,9 +55,7 @@ jobs: Dict[str, Dict[str, Any]] = {}
 
 
 # Global instances
-db: lancedb.DBConnection = None
 indexer: Indexer = None
-searcher: Searcher = None
 fts_index = None
 
 # ============== Custom Prometheus Metrics ==============
@@ -86,19 +83,7 @@ RAG_LATENCY = Histogram(
     buckets=[1.0, 2.5, 5.0, 10.0, 20.0, 30.0, 60.0]
 )
 
-# Ollama metrics
-OLLAMA_LATENCY = Histogram(
-    'recall_ollama_latency_seconds',
-    'Ollama embedding/generation latency',
-    ['operation'],  # embed, generate
-    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
-)
-
-OLLAMA_ERRORS = Counter(
-    'recall_ollama_errors_total',
-    'Ollama errors',
-    ['operation']
-)
+# (Ollama metrics removed — vectorless mode)
 
 # Index metrics
 INDEX_DURATION = Histogram(
@@ -154,42 +139,29 @@ API_INFO = Info('recall_api', 'API version and build info')
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on startup."""
-    global db, indexer, searcher, fts_index
+    global indexer, fts_index
     
-    logger.info("Starting Recall API...")
+    logger.info("Starting Recall API (vectorless mode)...")
     
-    # Connect to LanceDB
-    logger.info(f"Connecting to LanceDB at {settings.lancedb_path}")
-    db = lancedb.connect(settings.lancedb_path)
-    
-    # Initialize FTS index for hybrid search (optional - falls back to vector-only)
+    # Initialize FTS index
     from fts_index import FTSIndex
-    import os
-    fts_db_path = os.path.join(settings.lancedb_path, "fts_index.db")
+    fts_db_path = settings.fts_db_path
     try:
         fts_index = FTSIndex(fts_db_path)
         logger.info(f"FTS index initialized at {fts_index.db_path}")
     except Exception as e:
-        logger.warning(f"FTS index unavailable: {e}. Hybrid search will fall back to vector-only.")
+        logger.error(f"FTS index failed: {e}")
         fts_index = None
     
-    # Initialize indexer and searcher with FTS index
-    indexer = Indexer(db, settings, fts_index=fts_index)
-    searcher = Searcher(db, settings, fts_index=fts_index)
+    # Initialize indexer (FTS-only)
+    indexer = Indexer(settings, fts_index=fts_index)
     
-    # Initialize tables if needed
-    await indexer.init_tables()
-    
-    # Initialize health metrics with default values
-    COMPONENT_UP.labels(component="ollama").set(0)
-    COMPONENT_UP.labels(component="lancedb").set(0)
-    COMPONENT_UP.labels(component="fts").set(0)
-    INDEX_DOCUMENTS.labels(vault="work", index_type="vector").set(0)
-    INDEX_DOCUMENTS.labels(vault="personal", index_type="vector").set(0)
+    # Initialize metrics
+    COMPONENT_UP.labels(component="fts").set(1 if fts_index else 0)
     INDEX_DOCUMENTS.labels(vault="work", index_type="fts").set(0)
     INDEX_DOCUMENTS.labels(vault="personal", index_type="fts").set(0)
     
-    logger.info("Recall API ready (hybrid search enabled)")
+    logger.info("Recall API ready (BM25 + Gemini Flash)")
     
     yield
     
@@ -243,46 +215,12 @@ from fastapi.responses import Response
 
 async def update_health_metrics():
     """Update component health and document count metrics."""
-    global db, fts_index
-    
-    # Check Ollama
-    ollama_up = 0
+    global fts_index
+    COMPONENT_UP.labels(component="fts").set(1 if fts_index else 0)
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{settings.ollama_url}/api/tags", timeout=3.0)
-            if resp.status_code == 200:
-                ollama_up = 1
-    except:
-        pass
-    
-    # Check LanceDB
-    lancedb_up = 0
-    try:
-        if db and db.table_names() is not None:
-            lancedb_up = 1
-    except:
-        pass
-    
-    # Check FTS
-    fts_up = 1 if fts_index else 0
-    
-    # Update health gauges
-    COMPONENT_UP.labels(component="ollama").set(ollama_up)
-    COMPONENT_UP.labels(component="lancedb").set(lancedb_up)
-    COMPONENT_UP.labels(component="fts").set(fts_up)
-    
-    # Update document counts
-    try:
-        if db and "work" in db.table_names():
-            INDEX_DOCUMENTS.labels(vault="work", index_type="vector").set(db.open_table("work").count_rows())
-        if db and "personal" in db.table_names():
-            INDEX_DOCUMENTS.labels(vault="personal", index_type="vector").set(db.open_table("personal").count_rows())
         if fts_index:
-            try:
-                INDEX_DOCUMENTS.labels(vault="work", index_type="fts").set(fts_index.get_document_count("work"))
-                INDEX_DOCUMENTS.labels(vault="personal", index_type="fts").set(fts_index.get_document_count("personal"))
-            except:
-                pass
+            INDEX_DOCUMENTS.labels(vault="work", index_type="fts").set(fts_index.get_document_count("work"))
+            INDEX_DOCUMENTS.labels(vault="personal", index_type="fts").set(fts_index.get_document_count("personal"))
     except:
         pass
 
@@ -419,73 +357,26 @@ async def ping():
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
-    global db, indexer
-    
-    # Check Ollama (with short timeout)
-    ollama_status = "ok"
-    try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{settings.ollama_url}/api/tags", timeout=3.0)
-            if resp.status_code != 200:
-                ollama_status = "error"
-    except Exception as e:
-        ollama_status = f"error: {str(e)}"
-    
-    # Check LanceDB
-    lancedb_status = "ok"
-    try:
-        tables = db.table_names()
-    except Exception as e:
-        lancedb_status = f"error: {str(e)}"
-    
-    # Check FTS
     fts_status = "ok" if fts_index else "unavailable"
-    
-    # Update Prometheus health gauges
-    COMPONENT_UP.labels(component="ollama").set(1 if ollama_status == "ok" else 0)
-    COMPONENT_UP.labels(component="lancedb").set(1 if lancedb_status == "ok" else 0)
     COMPONENT_UP.labels(component="fts").set(1 if fts_index else 0)
     
-    # Get stats
     stats = {
-        "work_vectors": 0,
-        "personal_vectors": 0,
         "work_fts": 0,
         "personal_fts": 0,
         "active_jobs": len([j for j in jobs.values() if j["status"] in [JobStatus.PENDING, JobStatus.RUNNING]]),
     }
     try:
-        if "work" in db.table_names():
-            stats["work_vectors"] = db.open_table("work").count_rows()
-        if "personal" in db.table_names():
-            stats["personal_vectors"] = db.open_table("personal").count_rows()
-        # FTS stats
         if fts_index:
-            try:
-                stats["work_fts"] = fts_index.get_document_count("work")
-                stats["personal_fts"] = fts_index.get_document_count("personal")
-            except:
-                stats["work_fts"] = 0
-                stats["personal_fts"] = 0
-        else:
-            stats["fts_available"] = False
-        
-        # Update index document gauges
-        INDEX_DOCUMENTS.labels(vault="work", index_type="vector").set(stats["work_vectors"])
-        INDEX_DOCUMENTS.labels(vault="personal", index_type="vector").set(stats["personal_vectors"])
-        INDEX_DOCUMENTS.labels(vault="work", index_type="fts").set(stats["work_fts"])
-        INDEX_DOCUMENTS.labels(vault="personal", index_type="fts").set(stats["personal_fts"])
+            stats["work_fts"] = fts_index.get_document_count("work")
+            stats["personal_fts"] = fts_index.get_document_count("personal")
+            INDEX_DOCUMENTS.labels(vault="work", index_type="fts").set(stats["work_fts"])
+            INDEX_DOCUMENTS.labels(vault="personal", index_type="fts").set(stats["personal_fts"])
     except:
         pass
     
     return HealthResponse(
-        status="healthy" if ollama_status == "ok" and lancedb_status == "ok" else "degraded",
-        components={
-            "ollama": ollama_status,
-            "lancedb": lancedb_status,
-            "fts": fts_status,
-        },
+        status="healthy" if fts_status == "ok" else "degraded",
+        components={"fts": fts_status},
         stats=stats
     )
 
@@ -502,8 +393,6 @@ async def search(request: SearchRequest):
     - "query": Full pipeline with query expansion + reranking (best quality, slower)
     - "vectorless": BM25-only search, no embeddings needed (fast, no GPU)
     """
-    global searcher
-    
     import time
     start = time.time()
     mode = request.mode or "hybrid"
@@ -524,15 +413,15 @@ async def search(request: SearchRequest):
         SEARCH_RESULTS.labels(mode="vectorless").observe(len(results))
         return SearchResponse(results=results, total=len(results), query_time_ms=duration_ms)
     
-    results = await searcher.search(
+    # All search modes now route through vectorless searcher
+    vs = get_vectorless_searcher()
+    results = await vs.search(
         query=request.query,
         vault=request.vault,
-        category=request.category,
-        person=request.person,
         limit=request.limit,
-        mode=mode,
+        person=request.person,
         date_from=request.date_from,
-        date_to=request.date_to
+        date_to=request.date_to,
     )
     
     duration = time.time() - start
@@ -574,9 +463,11 @@ async def query(request: QueryRequest):
         RAG_LATENCY.labels(vault=request.vault or "all").observe(duration_ms / 1000)
         return QueryResponse(answer=answer, sources=sources, query_time_ms=duration_ms)
     
-    answer, sources = await searcher.query_with_llm(
+    vs = get_vectorless_searcher()
+    answer, sources, _ = await vs.query_with_llm(
         question=request.question,
-        vault=request.vault
+        vault=request.vault,
+        mode="vectorless",
     )
     
     duration = time.time() - start
@@ -632,62 +523,31 @@ async def run_indexing(request: IndexRequest):
     )
 
 
-async def _run_indexing_job(job_id: str, full: bool, vault: str, callback_url: Optional[str], use_gpu: bool = True):
-    """Background task to run indexing and send callback."""
+async def _run_indexing_job(job_id: str, full: bool, vault: str, callback_url: Optional[str], use_gpu: bool = False):
+    """Background task to run FTS indexing."""
     global indexer, jobs
     
     jobs[job_id]["status"] = JobStatus.RUNNING
     start = time.time()
-    gpu_activated = False
     
-    # Set up progress tracking for Prometheus metrics
     INDEX_JOB_RUNNING.set(1)
     INDEX_TOTAL_FILES.set(0)
     INDEX_PROCESSED_FILES.set(0)
     INDEX_PROGRESS_PERCENT.set(0)
     INDEX_ETA_SECONDS.set(0)
     
-    # GPU Offload: Wake PC and use GPU Ollama
-    if use_gpu and settings.gpu_ollama_enabled:
-        from gpu_offload import wake_and_wait, check_ollama_health
-        
-        logger.info(f"GPU offload enabled, waking PC...")
-        jobs[job_id]["progress"] = {"processed": 0, "total": 0, "percent": 0, "current_file": "Waking GPU PC..."}
-        
-        gpu_ready = await wake_and_wait(
-            mac_address=settings.gpu_wol_mac,
-            ollama_url=settings.gpu_ollama_url,
-            broadcast_ip=settings.gpu_wol_broadcast,
-            boot_wait_seconds=settings.gpu_boot_wait_seconds,
-            health_timeout_seconds=settings.gpu_health_timeout_seconds,
-            wol_server_url=settings.gpu_wol_server_url
-        )
-        
-        if gpu_ready:
-            indexer.set_gpu_ollama_url(settings.gpu_ollama_url)
-            gpu_activated = True
-            logger.info(f"GPU Ollama ready at {settings.gpu_ollama_url}")
-        else:
-            logger.warning("GPU PC did not wake, falling back to CPU Ollama")
-    
     async def progress_callback(processed: int, total: int, current_file: str):
-        """Update Prometheus metrics with indexing progress."""
         INDEX_TOTAL_FILES.set(total)
         INDEX_PROCESSED_FILES.set(processed)
-        
         if total > 0:
             percent = (processed / total) * 100
             INDEX_PROGRESS_PERCENT.set(percent)
-            
-            # Estimate time remaining based on elapsed time
             elapsed = time.time() - start
             if processed > 0:
-                rate = processed / elapsed  # files per second
+                rate = processed / elapsed
                 remaining = total - processed
                 eta = remaining / rate if rate > 0 else 0
                 INDEX_ETA_SECONDS.set(eta)
-        
-        # Update job state for API
         jobs[job_id]["progress"] = {
             "processed": processed,
             "total": total,
@@ -710,84 +570,31 @@ async def _run_indexing_job(job_id: str, full: bool, vault: str, callback_url: O
             "indexed": indexed,
         })
         
-        # Reset progress metrics (job complete)
         INDEX_JOB_RUNNING.set(0)
         INDEX_PROGRESS_PERCENT.set(100)
         INDEX_ETA_SECONDS.set(0)
         
-        # Clear GPU Ollama URL and shutdown PC if it was used
-        if gpu_activated:
-            indexer.clear_gpu_ollama_url()
-            logger.info("Cleared GPU Ollama URL")
-            
-            # Auto-shutdown GPU PC if enabled
-            if settings.gpu_auto_shutdown:
-                from gpu_offload import shutdown_gpu_pc
-                logger.info("Sending shutdown request to GPU PC...")
-                await shutdown_gpu_pc(
-                    shutdown_url=settings.gpu_shutdown_url,
-                    secret=settings.gpu_shutdown_secret
-                )
-        
-        # Send callback if URL provided
         if callback_url:
-            callback_payload = {
-                "job_id": job_id,
-                "status": "completed",
-                "stats": {
-                    "indexed": indexed,
-                    "duration_ms": duration_ms,
-                    "vault": vault,
-                    "full": full,
-                }
-            }
             try:
                 async with httpx.AsyncClient() as client:
-                    await client.post(callback_url, json=callback_payload, timeout=30.0)
-                    logger.info(f"Job {job_id}: callback sent to {callback_url}")
+                    await client.post(callback_url, json={
+                        "job_id": job_id, "status": "completed",
+                        "stats": {"indexed": indexed, "duration_ms": duration_ms},
+                    }, timeout=30.0)
             except Exception as e:
-                logger.error(f"Job {job_id}: callback failed: {e}")
+                logger.error(f"Callback failed: {e}")
     
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        error_msg = str(e)
-        
         jobs[job_id].update({
             "status": JobStatus.FAILED,
             "completed_at": time.time(),
             "duration_ms": duration_ms,
-            "error": error_msg,
+            "error": str(e),
         })
-        
-        logger.error(f"Job {job_id} failed: {error_msg}")
-        
-        # Reset progress metrics (job failed)
+        logger.error(f"Job {job_id} failed: {e}")
         INDEX_JOB_RUNNING.set(0)
         INDEX_ETA_SECONDS.set(0)
-        
-        # Clear GPU Ollama URL if it was used
-        if gpu_activated:
-            indexer.clear_gpu_ollama_url()
-            logger.info("Cleared GPU Ollama URL after failure")
-        
-        # Send failure callback if URL provided
-        if callback_url:
-            callback_payload = {
-                "job_id": job_id,
-                "status": "failed",
-                "error": error_msg,
-                "stats": {
-                    "duration_ms": duration_ms,
-                    "vault": vault,
-                    "full": full,
-                }
-            }
-            try:
-                async with httpx.AsyncClient() as client:
-                    await client.post(callback_url, json=callback_payload, timeout=30.0)
-                    logger.info(f"Job {job_id}: failure callback sent to {callback_url}")
-            except Exception as ce:
-                logger.error(f"Job {job_id}: failure callback failed: {ce}")
 
 
 @app.post("/index/start", response_model=AsyncIndexStartResponse)
@@ -990,34 +797,19 @@ async def get_index_progress():
     }
 
 
-@app.post("/index/init")
-async def init_index():
-    """Initialize LanceDB tables."""
-    global indexer
-    
-    await indexer.init_tables()
-    return {"status": "initialized"}
+# /index/init removed (no LanceDB tables to init)
 
 
 @app.get("/stats")
 async def get_stats():
     """Get indexing statistics."""
-    global db
-    
-    stats = {
-        "tables": db.table_names(),
-        "work_vectors": 0,
-        "personal_vectors": 0,
-    }
-    
+    stats = {"work_fts": 0, "personal_fts": 0}
     try:
-        if "work" in db.table_names():
-            stats["work_vectors"] = db.open_table("work").count_rows()
-        if "personal" in db.table_names():
-            stats["personal_vectors"] = db.open_table("personal").count_rows()
+        if fts_index:
+            stats["work_fts"] = fts_index.get_document_count("work")
+            stats["personal_fts"] = fts_index.get_document_count("personal")
     except:
         pass
-    
     return stats
 
 
