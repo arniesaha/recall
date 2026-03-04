@@ -21,7 +21,7 @@ const headers = {
 export async function search(query, limit = 10, options = {}) {
   const { person = null, vault = 'work', dateFrom = null, dateTo = null } = options
   
-  const body = { query, limit, vault }
+  const body = { query, limit, vault, mode: "vectorless" }
   if (person) body.person = person
   if (dateFrom) body.date_from = dateFrom
   if (dateTo) body.date_to = dateTo
@@ -51,7 +51,7 @@ export async function queryRAG(query, limit = 5, vault = 'work') {
   const response = await fetch(`${API_BASE}/query`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question: query, limit, vault })
+    body: JSON.stringify({ question: query, limit, vault, mode: "vectorless" })
   })
 
   if (!response.ok) {
