@@ -303,7 +303,12 @@ class Searcher:
         bm25_task = self.bm25_search(bm25_query, vault, person, limit=30, date_from=date_from, date_to=date_to)
         vector_task = self.vector_search(search_query, vault, category, person, limit=30, date_from=date_from, date_to=date_to)
         
-        bm25_results, vector_results = await asyncio.gather(bm25_task, vector_task)
+        try:
+            bm25_results, vector_results = await asyncio.gather(bm25_task, vector_task)
+        except Exception as e:
+            logger.warning(f"Vector search failed ({e}), falling back to BM25-only")
+            bm25_results = await self.bm25_search(bm25_query, vault, person, limit=30, date_from=date_from, date_to=date_to)
+            vector_results = []
         
         logger.info(f"Hybrid search: BM25={len(bm25_results)}, Vector={len(vector_results)}, person_query={is_person_query}")
         
