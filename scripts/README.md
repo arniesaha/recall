@@ -2,46 +2,34 @@
 
 Utility scripts for Recall.
 
-## Configuration
-
-All scripts use environment variables for paths. Set them in your `.env` file or export them:
-
-```bash
-export OBSIDIAN_WORK_PATH=/path/to/your/obsidian/work
-export VAULT_PATH=/path/to/your/obsidian/work
-```
-
-See `../.env.example` for all available options.
-
 ## Available Scripts
 
 ### daily_vault_sync.py
 
-Main synchronization script. Wakes GPU PC, triggers indexing, and monitors progress.
+Triggers FTS reindexing of the vault via the API.
 
 ```bash
-python3 scripts/daily_vault_sync.py
+RECALL_API_TOKEN=your-token python daily_vault_sync.py
+```
+
+### wol-server.py
+
+Wake-on-LAN HTTP server — sends magic packets to wake machines on the network.
+
+```bash
+python wol-server.py
+# POST http://localhost:9753/wake {"mac": "AA:BB:CC:DD:EE:FF"}
+```
+
+### gpu-shutdown-server.py
+
+HTTP endpoint to remotely shut down a machine (used for GPU PC power management).
+
+```bash
+GPU_SHUTDOWN_SECRET=your-secret python gpu-shutdown-server.py
+# POST http://localhost:8765/shutdown (Authorization: Bearer your-secret)
 ```
 
 ### reorganize_v2.py
 
-Vault reorganization tool. Consolidates duplicate folders, improves categorization.
-
-```bash
-python3 scripts/reorganize_v2.py --dry-run  # Preview changes
-python3 scripts/reorganize_v2.py            # Apply changes
-```
-
-## Infrastructure Scripts
-
-### gpu-shutdown-server.py
-
-HTTP server for remote GPU PC shutdown. See `GPU-SETUP.md` for setup.
-
-### wol-server.py
-
-Wake-on-LAN server for waking the GPU PC remotely.
-
-## Automation
-
-Set up a cron job or use the Recall API's built-in scheduling.
+Reorganizes Obsidian vault files into a structured folder hierarchy.

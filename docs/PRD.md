@@ -1,3 +1,5 @@
+> ⚠️ **Note:** Some technical details in this PRD reference the original vector-based architecture. The current implementation (v3) uses BM25 + Gemini Flash. See [ARCHITECTURE.md](ARCHITECTURE.md).
+
 # Recall — Product Requirements Document
 
 **Version:** 1.1

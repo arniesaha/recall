@@ -1,3 +1,5 @@
+> ⚠️ **Note:** This spec was written for v1/v2 which used Ollama + LanceDB vectors. The current architecture (v3) uses BM25 + Gemini Flash with no embeddings. See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
+
 # Recall — Technical Specification
 
 **Status:** ✅ Implemented

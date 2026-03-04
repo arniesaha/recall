@@ -1,48 +1,37 @@
-# note-rag Services
+# Recall Services
 
-Docker-based services for the note-rag system.
+Docker-based API and UI for the Recall knowledge system.
 
 ## Quick Start
 
 ### 1. Setup Environment
 
 ```bash
-# Copy and edit environment file
 cp .env.example .env
-# Edit .env with your settings
+# Edit .env: set API_TOKEN and GEMINI_API_KEY
 ```
 
 ### 2. Configure Vault Paths
 
-Edit `docker-compose.yml` or set environment variables:
+Set environment variables or edit docker-compose:
 
 ```bash
 export OBSIDIAN_PATH=/path/to/your/obsidian/vault
-export LANCEDB_PATH=/path/to/lancedb/storage
 ```
 
 ### 3. Start Services
 
 ```bash
 docker compose up -d
-
-# Pull embedding models (first time)
-docker exec kg-ollama ollama pull nomic-embed-text
-docker exec kg-ollama ollama pull qwen2.5:0.5b  # For reranking
 ```
 
-### 4. Initialize & Index
+### 4. Index Documents
 
 ```bash
-# Run full index
 curl -X POST http://localhost:8080/index/start \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"vault": "all", "full": true}'
-
-# Check status
-curl http://localhost:8080/index/jobs \
-  -H "Authorization: Bearer YOUR_API_TOKEN"
 ```
 
 ### 5. Test
@@ -51,15 +40,15 @@ curl http://localhost:8080/index/jobs \
 # Health check
 curl http://localhost:8080/health
 
-# Search (hybrid mode)
+# Search
 curl -X POST http://localhost:8080/search \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"query": "project timeline", "mode": "hybrid", "limit": 5}'
+  -d '{"query": "project timeline", "limit": 5}'
 
-# Query with LLM answer
-curl -X POST http://localhost:8080/query \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
+# RAG query
+curl -X POST http://localhost:8080/query/vectorless \
+  -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"question": "What did we decide about the migration?"}'
 ```
@@ -68,60 +57,43 @@ curl -X POST http://localhost:8080/query \
 
 | Service | Port | Description |
 |---------|------|-------------|
-| `kg-ollama` | 11434 | Ollama (embeddings + reranking) |
-| `kg-api` | 8080 | FastAPI application |
+| `recall-api` | 8080 | FastAPI application |
+| `recall-ui` | 3000 | React frontend |
 
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/ping` | GET | Fast liveness check |
-| `/health` | GET | Full health check |
-| `/search` | POST | Hybrid search (BM25 + Vector) |
-| `/query` | POST | RAG query with LLM answer |
+| `/health` | GET | Health check + FTS stats |
+| `/search` | POST | BM25 search |
+| `/query` | POST | RAG query with Gemini answer |
+| `/query/vectorless` | POST | Explicit vectorless RAG query |
 | `/prep/{person}` | GET | 1:1 preparation context |
-| `/actions` | GET | Open action items |
-| `/index/start` | POST | Start async indexing |
-| `/index/jobs` | GET | List indexing jobs |
-| `/index/status/{job_id}` | GET | Job status |
+| `/index/start` | POST | Start FTS indexing |
+| `/index/progress` | GET | Indexing progress |
 | `/stats` | GET | Index statistics |
+| `/browse` | GET | File tree |
+| `/note` | GET | Note content |
 
 ## Search Modes
 
-| Mode | Description |
-|------|-------------|
-| `hybrid` | BM25 + Vector + RRF fusion (default, recommended) |
-| `query` | Full pipeline with expansion + reranking |
-| `vector` | Pure semantic search |
-| `bm25` | Pure keyword search |
+| Mode | Context | Description |
+|------|---------|-------------|
+| `vectorless` | ~7K tokens | BM25 top-50 chunks → Gemini (default) |
+| `fullcontext` | ~100K tokens | Full source files → Gemini (best quality) |
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `API_TOKEN` | Yes | API authentication |
+| `GEMINI_API_KEY` | Yes | Google Gemini API key |
+| `VECTORLESS_LLM_BACKEND` | No | `gemini` (default) or `openclaw` |
+| `VECTORLESS_GEMINI_MODEL` | No | Default: `gemini-2.5-flash` |
 
 ## Logs
 
 ```bash
-docker logs -f kg-api
-docker logs -f kg-ollama
-```
-
-## Troubleshooting
-
-### Ollama not ready
-
-```bash
-docker exec kg-ollama ollama list
-docker exec kg-ollama ollama pull nomic-embed-text
-```
-
-### API can't connect to Ollama
-
-```bash
-docker compose down && docker compose up -d
-```
-
-### Reindex needed
-
-```bash
-curl -X POST http://localhost:8080/index/start \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"vault": "all", "full": true}'
+docker logs -f recall-api
 ```
