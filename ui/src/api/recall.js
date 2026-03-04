@@ -1,6 +1,6 @@
 // API configuration
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
-const API_TOKEN = import.meta.env.VITE_API_TOKEN || '7a2953e9c597afe9c3f16c5b58a3c0eeba87cdb311a46103'
+const API_TOKEN = import.meta.env.VITE_API_TOKEN || ''
 
 const headers = {
   'Content-Type': 'application/json',

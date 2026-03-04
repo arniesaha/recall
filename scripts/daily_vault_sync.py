@@ -52,7 +52,7 @@ OLLAMA_PORT = 11434
 
 # Use NodePort (stable) instead of ClusterIP (can change on pod restart)
 RECALL_API_URL = os.environ.get("RECALL_API_URL", "http://192.168.1.70:30889")
-RECALL_API_TOKEN = os.environ.get("RECALL_API_TOKEN", "7a2953e9c597afe9c3f16c5b58a3c0eeba87cdb311a46103")
+RECALL_API_TOKEN = os.environ.get("RECALL_API_TOKEN", "")
 
 SHUTDOWN_SERVER_URL = f"http://{GPU_PC_IP}:8765"
 SHUTDOWN_TOKEN = os.environ.get("SHUTDOWN_TOKEN", "gpu-shutdown-ok")

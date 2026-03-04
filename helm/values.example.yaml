@@ -1,4 +1,6 @@
+# Recall Helm Values — Vectorless Architecture
 # Copy to values.yaml and fill in your values
+
 replicaCount: 1
 
 image:
@@ -8,14 +10,24 @@ image:
 
 api:
   apiToken: "your-api-token-here"
-  gpuOllamaUrl: "http://your-gpu-ip:11434"
-  gpuWolServerUrl: "http://your-nas-ip:9753"
-  gpuShutdownSecret: "your-shutdown-secret"
 
 ui:
   image:
     repository: localhost:5000/recall-ui
     tag: latest
 
-ollama:
+env:
+  GEMINI_API_KEY: "your-gemini-api-key"
+  VECTORLESS_LLM_BACKEND: "gemini"
+  VECTORLESS_GEMINI_MODEL: "gemini-2.5-flash"
+  VAULT_WORK_PATH: "/data/obsidian/work"
+  VAULT_PERSONAL_PATH: "/data/obsidian/personal"
+
+persistence:
   enabled: true
+  existingClaim: recall-data
+
+service:
+  type: NodePort
+  port: 8080
+  nodePort: 30889
