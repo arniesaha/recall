@@ -19,7 +19,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import logging
 
 PORT = 8765
-SECRET = "gpu-shutdown-ok"  # Must match Recall API config
+SECRET = os.environ.get("GPU_SHUTDOWN_SECRET", "changeme")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)

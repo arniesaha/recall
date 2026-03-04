@@ -55,7 +55,7 @@ RECALL_API_URL = os.environ.get("RECALL_API_URL", "http://192.168.1.70:30889")
 RECALL_API_TOKEN = os.environ.get("RECALL_API_TOKEN", "")
 
 SHUTDOWN_SERVER_URL = f"http://{GPU_PC_IP}:8765"
-SHUTDOWN_TOKEN = os.environ.get("SHUTDOWN_TOKEN", "gpu-shutdown-ok")
+SHUTDOWN_TOKEN = os.environ.get("SHUTDOWN_TOKEN", "")
 
 # Timeouts
 GPU_WAKE_TIMEOUT = 180  # 3 minutes to wake

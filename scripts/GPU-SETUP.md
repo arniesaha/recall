@@ -37,11 +37,11 @@ From NAS:
 curl http://10.10.10.2:8765/health
 
 # Trigger shutdown (use with caution!)
-curl -X POST -H "Authorization: Bearer gpu-shutdown-ok" http://10.10.10.2:8765/shutdown
+curl -X POST -H "Authorization: Bearer $GPU_SHUTDOWN_SECRET" http://10.10.10.2:8765/shutdown
 ```
 
 ## Security
 
 - Only accepts POST with correct Bearer token
-- Token: `gpu-shutdown-ok` (matches Recall API config)
+- Token: set via `GPU_SHUTDOWN_SECRET` env var
 - Only accessible from local network
