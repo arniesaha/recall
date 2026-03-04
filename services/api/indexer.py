@@ -60,7 +60,7 @@ class Indexer:
         # Extract category from parent folder
         parts = file_path.parts
         for part in parts:
-            if part in ("daily-notes", "Granola", "people", "projects"):
+            if part in ("daily-notes", "Granola", "people", "projects", "agent-memory"):
                 category = part
                 break
         
