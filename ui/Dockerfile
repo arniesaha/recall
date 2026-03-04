@@ -26,6 +26,9 @@ RUN echo 'server { \
         proxy_pass http://recall:8080/; \
         proxy_set_header Host $host; \
         proxy_set_header X-Real-IP $remote_addr; \
+        proxy_read_timeout 120s; \
+        proxy_connect_timeout 10s; \
+        proxy_send_timeout 60s; \
     } \
     location /health { \
         return 200 "ok"; \
