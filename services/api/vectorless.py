@@ -37,7 +37,15 @@ class VectorlessSearcher:
         self.settings = settings
         self.fts_index = fts_index
         
-        # LLM config
+        # LLM config — supports "gemini" or "openclaw" backend
+        self.llm_backend = os.getenv("VECTORLESS_LLM_BACKEND", "gemini")  # "gemini" or "openclaw"
+        
+        # Gemini config
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+        self.gemini_model = os.getenv("VECTORLESS_GEMINI_MODEL", "gemini-2.5-flash")
+        self.gemini_url = "https://generativelanguage.googleapis.com/v1beta"
+        
+        # OpenClaw gateway fallback
         self.llm_url = os.getenv(
             "VECTORLESS_LLM_URL",
             os.getenv("CLAWDBOT_URL", "http://host.docker.internal:18789")
@@ -272,7 +280,7 @@ class VectorlessSearcher:
         return None
     
     async def _generate_answer(self, question: str, context: str, sources: List[Dict]) -> str:
-        """Generate answer using long-context LLM."""
+        """Generate answer using long-context LLM (Gemini or OpenClaw gateway)."""
         
         source_list = "\n".join(
             f"- {s['title']} ({s.get('date', 'undated')})" for s in sources[:10]
@@ -293,6 +301,54 @@ Context:
 
 Answer concisely but thoroughly. Reference specific meetings, dates, and people when relevant."""
 
+        if self.llm_backend == "gemini" and self.gemini_api_key:
+            return await self._generate_gemini(prompt)
+        else:
+            return await self._generate_openclaw(prompt, sources)
+    
+    async def _generate_gemini(self, prompt: str) -> str:
+        """Generate answer using Gemini API directly."""
+        url = f"{self.gemini_url}/models/{self.gemini_model}:generateContent?key={self.gemini_api_key}"
+        
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "maxOutputTokens": 4096,
+                "temperature": 0.3,
+            },
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                # Extract text from Gemini response
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "No response generated.")
+                
+                logger.warning(f"Gemini returned unexpected format: {data}")
+                return "Gemini returned an unexpected response format."
+        
+        except Exception as e:
+            logger.error(f"Gemini API error: {e}")
+            # Fall back to OpenClaw gateway
+            logger.info("Falling back to OpenClaw gateway...")
+            try:
+                return await self._generate_openclaw(prompt, [])
+            except Exception as e2:
+                return f"⚠️ Both Gemini and gateway failed. Gemini: {e}, Gateway: {e2}"
+    
+    async def _generate_openclaw(self, prompt: str, sources: List[Dict]) -> str:
+        """Generate answer using OpenClaw gateway."""
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
@@ -312,7 +368,7 @@ Answer concisely but thoroughly. Reference specific meetings, dates, and people 
                 return data["choices"][0]["message"]["content"]
         
         except Exception as e:
-            logger.error(f"LLM generation error: {e}")
+            logger.error(f"OpenClaw gateway error: {e}")
             fallback_parts = [f"⚠️ LLM unavailable ({e}). Top BM25 results:\n"]
             for s in sources[:5]:
                 fallback_parts.append(f"**{s['title']}** ({s.get('date', 'undated')})")
