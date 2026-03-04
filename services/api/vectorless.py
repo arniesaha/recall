@@ -24,6 +24,35 @@ from config import Settings
 from fts_index import FTSIndex
 from temporal import parse_temporal_expression, extract_query_without_temporal
 
+# Import name detection from searcher
+import re
+COMMON_WORDS = {
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+    'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+    'should', 'may', 'might', 'must', 'shall', 'can', 'what', 'who', 'which',
+    'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few',
+    'more', 'most', 'some', 'no', 'not', 'only', 'just', 'also', 'now',
+    'about', 'after', 'before', 'between', 'into', 'through', 'during',
+    'meeting', 'meetings', 'one-on-one', '1:1', 'prep', 'notes', 'summary',
+    'action', 'items', 'discussion', 'talked', 'discussed', 'highlights',
+    'topic', 'topics', 'project', 'team', 'work', 'update', 'weekly', 'daily',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+    'september', 'october', 'november', 'december',
+}
+
+def detect_names(query: str):
+    names = set()
+    words = query.split()
+    for i, word in enumerate(words):
+        clean = re.sub(r'[^\w]', '', word)
+        if not clean: continue
+        if i == 0: continue
+        if clean[0].isupper() and not clean.isupper():
+            if clean.lower() not in COMMON_WORDS:
+                names.add(clean)
+    return names
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,7 +104,7 @@ class VectorlessSearcher:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
     ) -> List[Dict]:
-        """Vectorless search using BM25 only."""
+        """Vectorless search using BM25 with name-aware boosting."""
         if self.fts_index is None:
             logger.error("FTS index not available for vectorless search")
             return []
@@ -90,18 +119,59 @@ class VectorlessSearcher:
         else:
             search_query = query
         
-        results = self.fts_index.search(
-            query=search_query,
-            vault=vault,
-            limit=self.bm25_top_k,
-            person=person,
-            date_from=date_from,
-            date_to=date_to,
-        )
+        # Detect person names for targeted search
+        detected_names = detect_names(search_query)
+        is_person_query = len(detected_names) > 0
         
-        logger.info(f"Vectorless BM25: {len(results)} results for '{search_query}'")
+        if is_person_query and self.fts_index:
+            name_query = " ".join(detected_names)
+            logger.info(f"Vectorless person query: names={detected_names}, BM25 name query: '{name_query}'")
+            
+            # Name-focused search (finds docs mentioning the person)
+            name_results = self.fts_index.search(
+                query=name_query, vault=vault, limit=self.bm25_top_k,
+                person=None, date_from=date_from, date_to=date_to,
+            )
+            
+            # Full query search
+            full_results = self.fts_index.search(
+                query=search_query, vault=vault, limit=self.bm25_top_k,
+                person=person, date_from=date_from, date_to=date_to,
+            )
+            
+            # Merge: name results boosted 3x, scores ADD when both match
+            seen = {}
+            for r in name_results:
+                key = r.get("file_path", "")
+                r["score"] = r.get("score", 0) * 3.0
+                seen[key] = r
+            for r in full_results:
+                key = r.get("file_path", "")
+                if key not in seen:
+                    seen[key] = r
+                else:
+                    # Both searches found it — add scores (double relevance signal)
+                    seen[key]["score"] = seen[key]["score"] + r.get("score", 0)
+            
+            results = sorted(seen.values(), key=lambda x: x.get("score", 0), reverse=True)
+            
+            # Boost named 1:1 notes, penalize raw transcripts
+            for r in results:
+                title = r.get("title", "").lower()
+                if any(n.lower() in title for n in detected_names) and "transcript" not in title:
+                    r["score"] = r.get("score", 0) * 1.5
+                elif "transcript" in title:
+                    r["score"] = r.get("score", 0) * 0.8
+            results.sort(key=lambda x: x.get("score", 0), reverse=True)
+        else:
+            results = self.fts_index.search(
+                query=search_query, vault=vault, limit=self.bm25_top_k,
+                person=person, date_from=date_from, date_to=date_to,
+            )
         
-        # Normalize BM25 result fields to match SearchResponse schema
+        logger.info(f"Vectorless BM25: {len(results)} results for '{search_query}' (person={is_person_query})")
+        
+        # Normalize fields
         normalized = []
         for r in results[:limit]:
             normalized.append({
@@ -116,7 +186,7 @@ class VectorlessSearcher:
                 "vault": r.get("vault", ""),
             })
         return normalized
-    
+
     async def query_with_llm(
         self,
         question: str,
