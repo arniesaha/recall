@@ -62,6 +62,21 @@ class Settings(BaseSettings):
     # RAG
     max_context_chunks: int = 5
     
+    # PageIndex settings (vectorless RAG for PDFs)
+    pageindex_enabled: bool = True
+    pageindex_tree_dir: str = "/data/trees"
+    
+    # LLM Provider for PageIndex: "gpu" (primary, free), "max" (needs API mode enabled)
+    pageindex_llm_provider: str = "gpu"
+    
+    # Max (Mac Mini) - Primary, always on
+    max_gateway_url: str = "http://arnabs-mac-mini.local:18789"
+    max_gateway_token: str = ""  # Set from env: MAX_GATEWAY_TOKEN
+    max_model: str = "anthropic/claude-sonnet-4-5"
+    
+    # GPU PC - Fallback (free but needs wake)
+    gpu_model: str = "qwen2.5:32b"
+    
     class Config:
         env_file = ".env"
     

@@ -7,5 +7,14 @@ data:
   LANCEDB_PATH: "/data/lancedb"
   VAULT_WORK_PATH: "/data/obsidian/work"
   VAULT_PERSONAL_PATH: "/data/obsidian/personal"
+  PDF_WORK_PATH: "/data/pdfs/work"
+  PDF_PERSONAL_PATH: "/data/pdfs/personal"
   EXCLUDED_FOLDERS: {{ .Values.config.excludedFolders | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  # PageIndex settings
+  PAGEINDEX_ENABLED: {{ .Values.config.pageindexEnabled | quote }}
+  PAGEINDEX_TREE_DIR: {{ .Values.config.pageindexTreeDir | quote }}
+  PAGEINDEX_LLM_PROVIDER: {{ .Values.config.pageindexLlmProvider | quote }}
+  MAX_GATEWAY_URL: {{ .Values.config.maxGatewayUrl | quote }}
+  MAX_MODEL: {{ .Values.config.maxModel | quote }}
+  GPU_MODEL: {{ .Values.config.gpuModel | quote }}

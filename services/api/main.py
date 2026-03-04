@@ -331,6 +331,7 @@ class SearchResponse(BaseModel):
 class QueryRequest(BaseModel):
     question: str
     vault: Optional[str] = "all"
+    mode: Optional[str] = None  # None=hybrid, "vectorless", "fullcontext"
 
 
 class QueryResponse(BaseModel):
@@ -499,12 +500,29 @@ async def search(request: SearchRequest):
     - "bm25": Pure keyword search (fast)
     - "hybrid": BM25 + Vector with RRF fusion (recommended)
     - "query": Full pipeline with query expansion + reranking (best quality, slower)
+    - "vectorless": BM25-only search, no embeddings needed (fast, no GPU)
     """
     global searcher
     
     import time
     start = time.time()
     mode = request.mode or "hybrid"
+    
+    # Route vectorless mode to dedicated searcher
+    if mode == "vectorless":
+        vs = get_vectorless_searcher()
+        results = await vs.search(
+            query=request.query,
+            vault=request.vault,
+            limit=request.limit,
+            person=request.person,
+            date_from=request.date_from,
+            date_to=request.date_to,
+        )
+        duration_ms = int((time.time() - start) * 1000)
+        SEARCH_LATENCY.labels(mode="vectorless", vault=request.vault or "all").observe(duration_ms / 1000)
+        SEARCH_RESULTS.labels(mode="vectorless").observe(len(results))
+        return SearchResponse(results=results, total=len(results), query_time_ms=duration_ms)
     
     results = await searcher.search(
         query=request.query,
@@ -533,11 +551,28 @@ async def search(request: SearchRequest):
 
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
-    """RAG query with LLM-generated answer."""
+    """RAG query with LLM-generated answer.
+    
+    Set mode field to "vectorless" or "fullcontext" for vectorless RAG.
+    Default uses hybrid (BM25 + vector) search."""
     global searcher
     
     import time
     start = time.time()
+    
+    # Check if vectorless mode requested
+    mode = getattr(request, "mode", None) or "hybrid"
+    
+    if mode in ("vectorless", "fullcontext"):
+        vs = get_vectorless_searcher()
+        answer, sources, metadata = await vs.query_with_llm(
+            question=request.question,
+            vault=request.vault,
+            mode=mode,
+        )
+        duration_ms = int((time.time() - start) * 1000)
+        RAG_LATENCY.labels(vault=request.vault or "all").observe(duration_ms / 1000)
+        return QueryResponse(answer=answer, sources=sources, query_time_ms=duration_ms)
     
     answer, sources = await searcher.query_with_llm(
         question=request.question,
@@ -1361,3 +1396,346 @@ async def update_note(path: str, content: str = None, body: dict = None):
         f.write(content)
     
     return {"status": "updated", "path": path}
+
+
+# ============== PageIndex (Vectorless RAG for PDFs) ==============
+
+class TreeGenerateRequest(BaseModel):
+    pdf_path: str
+    vault: str = "work"
+    force: bool = False  # Regenerate even if tree exists
+
+
+class TreeSearchRequest(BaseModel):
+    query: str
+    vault: str = "all"  # "work", "personal", "all"
+    limit: int = 5
+
+
+class TreeSearchResult(BaseModel):
+    doc_name: str
+    pdf_path: str
+    vault: str
+    section: str
+    summary: str
+    pages: str
+    start_page: int
+    end_page: int
+    text: str
+    reasoning: str
+
+
+class TreeSearchResponse(BaseModel):
+    query: str
+    results: List[TreeSearchResult]
+    query_time_ms: int
+
+
+@app.post("/tree/generate")
+async def generate_tree(request: TreeGenerateRequest):
+    """
+    Generate PageIndex tree structure for a PDF.
+    
+    This uses LLM reasoning to create a hierarchical table of contents
+    that can be searched without embeddings.
+    """
+    from pathlib import Path
+    
+    if not settings.pageindex_enabled:
+        raise HTTPException(status_code=400, detail="PageIndex is disabled")
+    
+    pdf_path = Path(request.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF not found")
+    
+    from pageindex_tree import get_tree_generator
+    generator = get_tree_generator()
+    
+    # Check if tree already exists
+    if generator.tree_exists(str(pdf_path), request.vault) and not request.force:
+        existing = generator.load_tree(str(pdf_path), request.vault)
+        return {
+            "status": "exists",
+            "doc_name": existing.get("doc_name", ""),
+            "total_pages": existing.get("total_pages", 0),
+            "node_count": generator._count_nodes(existing.get("structure", [])),
+            "message": "Tree already exists. Use force=true to regenerate."
+        }
+    
+    # Extract PDF pages
+    try:
+        import fitz
+        doc = fitz.open(str(pdf_path))
+        pages = []
+        for page_num, page in enumerate(doc, start=1):
+            text = page.get_text("text")
+            if text and text.strip():
+                pages.append((page_num, text.strip()))
+        doc.close()
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PyMuPDF not installed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF extraction failed: {e}")
+    
+    if not pages:
+        raise HTTPException(status_code=400, detail="PDF has no extractable text")
+    
+    # Generate tree
+    import time
+    start = time.time()
+    
+    tree_data = await generator.generate_tree(
+        pages=pages,
+        doc_name=pdf_path.name,
+        pdf_path=str(pdf_path),
+        vault=request.vault
+    )
+    
+    duration_ms = int((time.time() - start) * 1000)
+    
+    return {
+        "status": "generated",
+        "doc_name": tree_data.get("doc_name", ""),
+        "total_pages": tree_data.get("total_pages", 0),
+        "node_count": generator._count_nodes(tree_data.get("structure", [])),
+        "duration_ms": duration_ms,
+        "structure": tree_data.get("structure", [])
+    }
+
+
+@app.post("/tree/search", response_model=TreeSearchResponse)
+async def search_trees(request: TreeSearchRequest):
+    """
+    Search PDFs using PageIndex tree reasoning.
+    
+    The LLM reasons over tree structures to find relevant sections
+    without using embeddings. Good for structured documents.
+    """
+    import time
+    
+    if not settings.pageindex_enabled:
+        raise HTTPException(status_code=400, detail="PageIndex is disabled")
+    
+    from tree_search import get_tree_searcher
+    searcher = get_tree_searcher()
+    
+    start = time.time()
+    results = await searcher.search(
+        query=request.query,
+        vault=request.vault,
+        limit=request.limit
+    )
+    duration_ms = int((time.time() - start) * 1000)
+    
+    return TreeSearchResponse(
+        query=request.query,
+        results=[TreeSearchResult(**r) for r in results],
+        query_time_ms=duration_ms
+    )
+
+
+@app.get("/tree/list")
+async def list_trees(vault: Optional[str] = None):
+    """List all generated PageIndex trees."""
+    if not settings.pageindex_enabled:
+        raise HTTPException(status_code=400, detail="PageIndex is disabled")
+    
+    from pageindex_tree import get_tree_generator
+    generator = get_tree_generator()
+    
+    trees = generator.list_trees(vault)
+    
+    return {
+        "trees": trees,
+        "total": len(trees)
+    }
+
+
+@app.delete("/tree/{vault}/{doc_name}")
+async def delete_tree(vault: str, doc_name: str):
+    """Delete a tree by vault and document name."""
+    if not settings.pageindex_enabled:
+        raise HTTPException(status_code=400, detail="PageIndex is disabled")
+    
+    from pageindex_tree import get_tree_generator
+    generator = get_tree_generator()
+    
+    # Find the tree by doc_name
+    trees = generator.list_trees(vault)
+    for tree in trees:
+        if tree.get("doc_name") == doc_name:
+            pdf_path = tree.get("pdf_path", "")
+            if generator.delete_tree(pdf_path, vault):
+                return {"status": "deleted", "doc_name": doc_name}
+    
+    raise HTTPException(status_code=404, detail="Tree not found")
+
+
+@app.get("/tree/health")
+async def pageindex_health():
+    """Check PageIndex LLM health."""
+    if not settings.pageindex_enabled:
+        return {"enabled": False}
+    
+    from pageindex_llm import get_pageindex_llm
+    llm = get_pageindex_llm()
+    
+    health = await llm.health_check()
+    
+    return {
+        "enabled": True,
+        "provider": settings.pageindex_llm_provider,
+        "llm_status": health,
+        "tree_dir": settings.pageindex_tree_dir
+    }
+
+
+@app.post("/tree/generate-all")
+async def generate_all_trees(vault: str = "work", background_tasks: BackgroundTasks = None):
+    """
+    Generate trees for all PDFs in a vault.
+    
+    This is a long-running operation that runs in the background.
+    """
+    from pathlib import Path
+    
+    if not settings.pageindex_enabled:
+        raise HTTPException(status_code=400, detail="PageIndex is disabled")
+    
+    # Get PDF path for vault
+    if vault == "work":
+        pdf_path = Path(settings.pdf_work_path)
+    else:
+        pdf_path = Path(settings.pdf_personal_path)
+    
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail=f"PDF directory not found: {pdf_path}")
+    
+    # List PDFs
+    pdfs = list(pdf_path.rglob("*.pdf"))
+    
+    from pageindex_tree import get_tree_generator
+    generator = get_tree_generator()
+    
+    # Check which need generation
+    pending = []
+    for pdf in pdfs:
+        if not generator.tree_exists(str(pdf), vault):
+            pending.append(str(pdf))
+    
+    if not pending:
+        return {
+            "status": "complete",
+            "message": "All trees already generated",
+            "total_pdfs": len(pdfs),
+            "pending": 0
+        }
+    
+    # For now, return info about what would be generated
+    # TODO: Implement background task for batch generation
+    return {
+        "status": "pending",
+        "message": f"Found {len(pending)} PDFs needing tree generation",
+        "total_pdfs": len(pdfs),
+        "pending": len(pending),
+        "pending_files": [Path(p).name for p in pending]
+    }
+
+
+# ============== Vectorless RAG Endpoints ==============
+
+from vectorless import VectorlessSearcher
+
+# Lazy init (needs fts_index from lifespan)
+_vectorless_searcher: Optional[VectorlessSearcher] = None
+
+def get_vectorless_searcher() -> VectorlessSearcher:
+    global _vectorless_searcher, fts_index
+    if _vectorless_searcher is None:
+        _vectorless_searcher = VectorlessSearcher(settings, fts_index=fts_index)
+    return _vectorless_searcher
+
+
+class VectorlessSearchRequest(BaseModel):
+    query: str
+    vault: Optional[str] = "all"
+    limit: int = 10
+    person: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+
+class VectorlessQueryRequest(BaseModel):
+    question: str
+    vault: Optional[str] = "all"
+    mode: Optional[str] = "vectorless"  # "vectorless" or "fullcontext"
+
+
+class VectorlessQueryResponse(BaseModel):
+    answer: str
+    sources: List[dict]
+    metadata: dict
+
+
+@app.post("/search/vectorless", response_model=SearchResponse)
+async def vectorless_search(request: VectorlessSearchRequest):
+    """
+    Vectorless search — BM25 keyword retrieval only.
+    No embeddings, no GPU, no Ollama needed.
+    """
+    vs = get_vectorless_searcher()
+    
+    start = time.time()
+    
+    results = await vs.search(
+        query=request.query,
+        vault=request.vault,
+        limit=request.limit,
+        person=request.person,
+        date_from=request.date_from,
+        date_to=request.date_to,
+    )
+    
+    duration_ms = int((time.time() - start) * 1000)
+    
+    SEARCH_LATENCY.labels(mode="vectorless", vault=request.vault or "all").observe(
+        (time.time() - start)
+    )
+    SEARCH_RESULTS.labels(mode="vectorless").observe(len(results))
+    
+    return SearchResponse(
+        results=results,
+        total=len(results),
+        query_time_ms=duration_ms,
+    )
+
+
+@app.post("/query/vectorless", response_model=VectorlessQueryResponse)
+async def vectorless_query(request: VectorlessQueryRequest):
+    """
+    Vectorless RAG query — BM25 retrieval + long-context LLM answer.
+    
+    Modes:
+      - vectorless: BM25 chunks stuffed into LLM context (default, fast)
+      - fullcontext: Full file contents loaded into LLM context (best quality, higher cost)
+    
+    No embeddings needed. No GPU needed.
+    """
+    vs = get_vectorless_searcher()
+    
+    start = time.time()
+    
+    answer, sources, metadata = await vs.query_with_llm(
+        question=request.question,
+        vault=request.vault,
+        mode=request.mode or "vectorless",
+    )
+    
+    duration = time.time() - start
+    RAG_LATENCY.labels(vault=request.vault or "all").observe(duration)
+    
+    return VectorlessQueryResponse(
+        answer=answer,
+        sources=sources,
+        metadata=metadata,
+    )

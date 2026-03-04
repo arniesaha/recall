@@ -32,6 +32,8 @@ spec:
         - name: pdfs
           mountPath: /data/pdfs
           readOnly: true
+        - name: trees
+          mountPath: /data/trees
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
         livenessProbe:
@@ -58,6 +60,10 @@ spec:
       - name: pdfs
         hostPath:
           path: {{ .Values.volumes.pdfs }}
+          type: DirectoryOrCreate
+      - name: trees
+        hostPath:
+          path: {{ .Values.volumes.trees }}
           type: DirectoryOrCreate
 ---
 {{- if .Values.ollama.enabled }}
