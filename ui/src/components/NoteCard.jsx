@@ -1,4 +1,5 @@
-import { FileText, Folder } from 'lucide-react'
+import { FileText, Folder, ExternalLink } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 export default function NoteCard({ result, onClick, isExpanded = false }) {
   const {
@@ -69,6 +70,20 @@ export default function NoteCard({ result, onClick, isExpanded = false }) {
       <p className="text-sm text-text-secondary line-clamp-3 leading-relaxed">
         {snippet}
       </p>
+
+      {/* View full note link */}
+      {file_path && (
+        <div className="mt-3 pt-2 border-t border-border/50">
+          <Link
+            to={`/note?path=${encodeURIComponent(file_path.replace(/^\/data\/obsidian\//, ''))}`}
+            className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-accent transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ExternalLink className="w-3 h-3" />
+            View full note
+          </Link>
+        </div>
+      )}
     </div>
   )
 }

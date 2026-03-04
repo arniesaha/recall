@@ -72,21 +72,38 @@ export default function AIAnswer({
       {sources && sources.length > 0 && (
         <div className="mt-4 pt-4 border-t border-border">
           <div className="text-sm text-text-secondary mb-2">Sources:</div>
-          <div className="flex flex-wrap gap-2">
-            {sources.map((source, idx) => (
-              <a
-                key={idx}
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault()
-                  // Future: navigate to note
-                }}
-                className="inline-flex items-center gap-1 px-2 py-1 bg-bg-tertiary rounded text-sm text-text-secondary hover:text-accent transition-colors"
-              >
-                <ExternalLink className="w-3 h-3" />
-                {source.title || source.file || `Source ${idx + 1}`}
-              </a>
-            ))}
+          <div className="flex flex-col gap-2">
+            {sources.map((source, idx) => {
+              // Convert absolute path to API-compatible path
+              const filePath = (source.file || '')
+                .replace(/^\/data\/obsidian\//, '')
+              const noteUrl = filePath ? `/note?path=${encodeURIComponent(filePath)}` : '#'
+              const displayTitle = source.title || source.file?.split('/').pop()?.replace('.md', '') || `Source ${idx + 1}`
+              const displayDate = source.date || null
+              
+              return (
+                <Link
+                  key={idx}
+                  to={noteUrl}
+                  className="flex items-center gap-3 px-3 py-2 bg-bg-tertiary rounded-lg hover:bg-bg-tertiary/80 hover:border-accent/40 border border-transparent transition-all group"
+                >
+                  <ExternalLink className="w-4 h-4 text-text-secondary group-hover:text-accent flex-shrink-0 transition-colors" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-text-primary group-hover:text-accent transition-colors truncate">
+                      {displayTitle}
+                    </div>
+                    {displayDate && (
+                      <div className="text-xs text-text-secondary mt-0.5">{displayDate}</div>
+                    )}
+                  </div>
+                  {source.vault && (
+                    <span className="text-xs text-text-secondary bg-bg-secondary px-2 py-0.5 rounded flex-shrink-0">
+                      {source.vault}
+                    </span>
+                  )}
+                </Link>
+              )
+            })}
           </div>
         </div>
       )}
