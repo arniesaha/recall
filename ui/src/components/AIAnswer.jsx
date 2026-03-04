@@ -4,71 +4,124 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 /**
- * Post-process the AI answer to convert inline source citations like
- * "(Source: Reliability initiative planning with Vijay, 2026-03-02)"
- * into clickable markdown links pointing to /note?path=...
+ * Post-process the AI answer to convert inline source citations into
+ * clickable markdown links pointing to /note?path=...
+ *
+ * Gemini produces several citation formats:
+ *   1. (Source 1, 3: "Reliability initiative planning with Vijay")
+ *   2. (Source: Reliability initiative planning with Vijay, 2026-03-02)
+ *   3. **Title (2026-03-02, Source 3, 17):**
  */
 function linkifySources(text, sources) {
   if (!text || !sources || sources.length === 0) return text
 
-  // Build a lookup: normalize title → source object
-  const sourceMap = new Map()
-  for (const s of sources) {
+  // Build lookups
+  const sourceMap = new Map()        // title → source
+  const sourceByIndex = new Map()    // 1-based index → source
+  for (let i = 0; i < sources.length; i++) {
+    const s = sources[i]
+    sourceByIndex.set(i + 1, s)
     const title = (s.title || '').trim()
     if (title) {
       sourceMap.set(title.toLowerCase(), s)
-      // Also index without date suffix for fuzzy match
+      // Also without trailing date
       const noDate = title.replace(/\s*[-–]\s*\d{4}[-/]\d{2}[-/]\d{2}$/, '').trim()
       if (noDate) sourceMap.set(noDate.toLowerCase(), s)
     }
   }
 
-  // Match patterns: (Source: <title>, <date>) or (Source: <title>)
-  // Also handles **Source:** and variations
-  return text.replace(
-    /\((?:\*{0,2})Source:?\*{0,2}\s*([^,)]+?)(?:,\s*(\d{4}-\d{2}-\d{2}))?\)/gi,
-    (match, rawTitle, date) => {
-      const title = rawTitle.trim()
-      const key = title.toLowerCase()
-      
-      // Try exact match, then fuzzy
-      let source = sourceMap.get(key)
-      if (!source) {
-        // Try matching by checking if any source title contains this text or vice versa
-        for (const [k, v] of sourceMap) {
-          if (k.includes(key) || key.includes(k)) {
-            source = v
-            break
-          }
-        }
+  function findSourceByTitle(rawTitle) {
+    const key = rawTitle.toLowerCase().trim()
+    let source = sourceMap.get(key)
+    if (source) return source
+    // Fuzzy: check containment
+    for (const [k, v] of sourceMap) {
+      if (k.includes(key) || key.includes(k)) return v
+    }
+    // Word overlap
+    const words = key.split(/\s+/).filter(w => w.length > 2)
+    let bestMatch = null, bestScore = 0
+    for (const [k, v] of sourceMap) {
+      const matchCount = words.filter(w => k.includes(w)).length
+      const score = matchCount / words.length
+      if (score > bestScore && score >= 0.5) {
+        bestScore = score
+        bestMatch = v
       }
-      // Also try matching by date if title didn't match
-      if (!source && date) {
-        for (const s of sources) {
-          if (s.date === date) {
-            const sTitle = (s.title || '').toLowerCase()
-            // Check partial overlap
-            const words = key.split(/\s+/)
-            const matchCount = words.filter(w => sTitle.includes(w)).length
-            if (matchCount >= words.length * 0.5) {
-              source = s
-              break
-            }
-          }
-        }
-      }
+    }
+    return bestMatch
+  }
 
-      if (source) {
-        const filePath = (source.file || '').replace(/^\/data\/obsidian\//, '')
-        const noteUrl = `/note?path=${encodeURIComponent(filePath)}`
-        const displayDate = date || source.date || ''
-        const label = displayDate ? `${title}, ${displayDate}` : title
-        return `([${label}](${noteUrl}))`
-      }
-      
-      return match // No match found, leave as-is
+  function sourceToLink(source, label) {
+    const filePath = (source.file || '').replace(/^\/data\/obsidian\//, '')
+    const noteUrl = `/note?path=${encodeURIComponent(filePath)}`
+    return `[${label}](${noteUrl})`
+  }
+
+  let result = text
+
+  // Pattern 1: (Source 1, 3: "Title here") or (Source 1: "Title here")
+  result = result.replace(
+    /\(Source\s+([\d,\s]+):\s*"([^"]+)"\)/gi,
+    (match, nums, title) => {
+      const source = findSourceByTitle(title)
+      if (source) return `(${sourceToLink(source, title)})`
+      return match
     }
   )
+
+  // Pattern 2: (Source: Title, 2026-03-02) or (Source: Title)
+  result = result.replace(
+    /\(Source:\s*([^,)]+?)(?:,\s*(\d{4}-\d{2}-\d{2}))?\)/gi,
+    (match, rawTitle, date) => {
+      const title = rawTitle.trim()
+      const source = findSourceByTitle(title)
+      if (source) {
+        const d = date || source.date || ''
+        const label = d ? `${title}, ${d}` : title
+        return `(${sourceToLink(source, label)})`
+      }
+      return match
+    }
+  )
+
+  // Pattern 3: **Bold Title (2026-03-02, Source 3, 17):**
+  // or: **Bold Title** (2026-03-02, Source 3, 17):
+  // Convert the whole header into a link
+  result = result.replace(
+    /\*\*([^*]+?)\*\*\s*\((\d{4}-\d{2}-\d{2}),\s*Source\s+[\d,\s]+\):?/gi,
+    (match, title, date) => {
+      const source = findSourceByTitle(title.trim())
+      if (source) return `**${sourceToLink(source, `${title.trim()}, ${date}`)}:**`
+      return match
+    }
+  )
+
+  // Pattern 3b: **Bold Title (2026-03-02, Source 3, 17):**  (title includes the parens inside bold)
+  result = result.replace(
+    /\*\*([^*(]+?)\s*\((\d{4}-\d{2}-\d{2}),\s*Source\s+[\d,\s]+\):?\*\*/gi,
+    (match, title, date) => {
+      const source = findSourceByTitle(title.trim())
+      if (source) return `**${sourceToLink(source, `${title.trim()}, ${date}`)}:**`
+      return match
+    }
+  )
+
+  // Pattern 4: standalone (Source N) or (Source N, M) without title — link by index
+  result = result.replace(
+    /\(Source\s+(\d+)(?:,\s*\d+)*\)/gi,
+    (match, firstNum) => {
+      const idx = parseInt(firstNum, 10)
+      const source = sourceByIndex.get(idx)
+      if (source) {
+        const label = source.title || `Source ${idx}`
+        return `(${sourceToLink(source, label)})`
+      }
+      return match
+    }
+  )
+
+  return result
 }
 
 export default function AIAnswer({ 
