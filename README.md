@@ -17,29 +17,37 @@ Your personal knowledge system. Search meeting transcripts, notes, decisions, an
 
 ## Architecture
 
-```
-Query → BM25 (SQLite FTS5) → Top-K chunks → Gemini 2.5 Flash → Answer
-                                    ↓
-                           Full files from disk (fullcontext mode)
+```mermaid
+flowchart TD
+  UI["Recall UI\nReact + Vite + Tailwind"]
+  API["Recall API\nFastAPI + Python"]
+  FTS["SQLite FTS5\nBM25 Search"]
+  VAULT["Obsidian Vault\nMarkdown + PDFs"]
+  GEMINI["Gemini 2.5 Flash\n1M context window"]
+
+  UI -->|"search / query"| API
+  API -->|"BM25 top-K chunks"| FTS
+  FTS -->|"ranked results"| API
+  API -->|"read source files"| VAULT
+  VAULT -->|"full context"| API
+  API -->|"prompt + context"| GEMINI
+  GEMINI -->|"answer + citations"| API
+  API -->|"response + sources"| UI
+
+  classDef ui    fill:#1e3a5f,stroke:#5b9cf6,color:#e4e9f5
+  classDef store fill:#1a3a2a,stroke:#34d399,color:#e4e9f5
+  classDef llm   fill:#3a2a10,stroke:#fbbf24,color:#e4e9f5
+
+  class UI,API ui
+  class FTS,VAULT store
+  class GEMINI llm
 ```
 
+**Query flow:**
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Recall UI                                │
-│                   (React + Vite + Tailwind)                     │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       Recall API                                │
-│                    (FastAPI + Python)                            │
-└─────────────────────────────────────────────────────────────────┘
-        │                    │                    │
-        ▼                    ▼                    ▼
-┌───────────────┐    ┌───────────────┐    ┌───────────────┐
-│ SQLite FTS5   │    │ Obsidian Vault│    │ Gemini Flash  │
-│   (BM25)      │    │  (Markdown)   │    │   (1M ctx)    │
-└───────────────┘    └───────────────┘    └───────────────┘
+vectorless mode:  Query → BM25 (FTS5) → top-50 chunks → Gemini → Answer + citations
+fullcontext mode: Query → BM25 (FTS5) → source files → Gemini (1M ctx) → Answer + citations
 ```
 
 ## Search Modes
