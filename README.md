@@ -19,11 +19,11 @@ Your personal knowledge system. Search meeting transcripts, notes, decisions, an
 
 ```mermaid
 flowchart TD
-  UI["Recall UI\nReact + Vite + Tailwind"]
-  API["Recall API\nFastAPI + Python"]
-  FTS["SQLite FTS5\nBM25 Search"]
-  VAULT["Obsidian Vault\nMarkdown + PDFs"]
-  GEMINI["Gemini 2.5 Flash\n1M context window"]
+  UI["Recall UI<br/>React + Vite + Tailwind"]
+  API["Recall API<br/>FastAPI + Python"]
+  FTS["SQLite FTS5<br/>BM25 Search"]
+  VAULT["Obsidian Vault<br/>Markdown + PDFs"]
+  GEMINI["Gemini 2.5 Flash<br/>1M context window"]
 
   UI -->|"search / query"| API
   API -->|"BM25 top-K chunks"| FTS
